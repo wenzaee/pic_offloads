@@ -1,8 +1,10 @@
-package main
+package mdns
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"pic_offload/pkg/core"
 	"sync"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -23,13 +25,14 @@ type PeerRegistry struct {
 	lock  sync.RWMutex
 }
 
-func NewPeerRegistry() *PeerRegistry {
+func NewRegistry() *PeerRegistry {
 	return &PeerRegistry{
 		peers: make(map[peer.ID]PeerInfo),
 	}
 }
 
 func (r *PeerRegistry) AddPeer(pi peer.AddrInfo) {
+	ctx := context.Background()
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -38,7 +41,11 @@ func (r *PeerRegistry) AddPeer(pi peer.AddrInfo) {
 		return
 	}
 
-	hostname := getHostname(filteredAddrs)
+	hostname, err := core.RequestHostname(ctx, core.Edgehost, pi.ID)
+	if err != nil {
+		fmt.Println("err", err)
+	}
+	fmt.Println("hostname", hostname)
 	r.peers[pi.ID] = PeerInfo{
 		Hostname: hostname,
 		AddrInfo: peer.AddrInfo{
@@ -105,7 +112,11 @@ func filterLocalAddresses(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
 		if err != nil {
 			continue
 		}
-
+		host, _, err = net.SplitHostPort(host)
+		if err != nil {
+			fmt.Println("hosterror:", err)
+			continue
+		}
 		ip := net.ParseIP(host)
 		if ip == nil {
 			continue
@@ -133,4 +144,15 @@ func isIPProtocol(addr multiaddr.Multiaddr) bool {
 
 func isPrivateIP(ip net.IP) bool {
 	return ip.IsPrivate() || ip.IsUnspecified()
+}
+func (r *PeerRegistry) Print() {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
+	for id, info := range r.peers {
+		fmt.Printf("[%s] %s\n", id, info.Hostname)
+		for _, addr := range info.AddrInfo.Addrs {
+			fmt.Printf("  └─ %s\n", addr)
+		}
+	}
 }

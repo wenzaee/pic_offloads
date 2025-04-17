@@ -18,6 +18,8 @@ func main() {
 	core.Edgehost, err = libp2p.New(
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/0",
+			"/ip4/0.0.0.0/udp/44599/quic",
+			"/ip4/0.0.0.0/tcp/44599",
 			"/ip4/0.0.0.0/udp/0/quic",
 		),
 		libp2p.DisableRelay(),
@@ -31,7 +33,7 @@ func main() {
 	fmt.Printf("host Peer ID: %s\n", core.Edgehost.ID())
 
 	// 初始化组件
-	registry := core.NewRegistry()
+	registry := mdns.NewRegistry()
 	mdnsService := mdns.NewService(mdns.Config{
 		Rendezvous: "my-network",
 		Host:       core.Edgehost,
