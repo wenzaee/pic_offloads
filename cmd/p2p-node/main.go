@@ -14,7 +14,8 @@ import (
 
 func main() {
 	// 初始化 libp2p 主机
-	host, err := libp2p.New(
+	var err error
+	core.Edgehost, err = libp2p.New(
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/0",
 			"/ip4/0.0.0.0/udp/0/quic",
@@ -22,17 +23,18 @@ func main() {
 		libp2p.DisableRelay(),
 		libp2p.Ping(true), // 启用 Ping 协议
 	)
+	core.Edgehost.SetStreamHandler("/hostname-protocol", core.HandleRequest)
 	if err != nil {
 		log.Fatalf("Failed to create host: %v", err)
 	}
-	defer host.Close()
-	fmt.Printf("host Peer ID: %s\n", host.ID())
+	defer core.Edgehost.Close()
+	fmt.Printf("host Peer ID: %s\n", core.Edgehost.ID())
 
 	// 初始化组件
 	registry := core.NewRegistry()
 	mdnsService := mdns.NewService(mdns.Config{
 		Rendezvous: "my-network",
-		Host:       host,
+		Host:       core.Edgehost,
 		Registry:   registry,
 	},
 	)
