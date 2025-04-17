@@ -20,6 +20,7 @@ func main() {
 			"/ip4/0.0.0.0/udp/0/quic",
 		),
 		libp2p.DisableRelay(),
+		libp2p.Ping(true), // 启用 Ping 协议
 	)
 	if err != nil {
 		log.Fatalf("Failed to create host: %v", err)
@@ -33,7 +34,8 @@ func main() {
 		Rendezvous: "my-network",
 		Host:       host,
 		Registry:   registry,
-	})
+	},
+	)
 
 	// 启动服务
 	if err := mdnsService.Start(); err != nil {

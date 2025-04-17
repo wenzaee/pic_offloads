@@ -1,6 +1,7 @@
 package mdns
 
 import (
+	"fmt"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 )
@@ -12,12 +13,13 @@ type Service struct {
 
 // NewService 创建 mDNS 服务实例
 func NewService(cfg Config) *Service {
-	notifee := notifee{
-		registry: cfg.Registry,
-	}
 
 	return &Service{
-		service: mdns.NewMdnsService(cfg.Host, cfg.Rendezvous, &notifee),
+		service: mdns.NewMdnsService(
+			cfg.Host,
+			cfg.Rendezvous,
+			&notifee{registry: cfg.Registry}, // 必须传递指针
+		),
 	}
 }
 
@@ -26,11 +28,11 @@ func (s *Service) Start() error {
 	return s.service.Start()
 }
 
-// 修正点：结构体名称需要与实例化时的名称一致
 type notifee struct {
 	registry RegistryInterface
 }
 
 func (n *notifee) HandlePeerFound(pi peer.AddrInfo) {
+	fmt.Printf("[DEBUG] Found peer: %s\n", pi.ID)
 	n.registry.AddPeer(pi)
 }
