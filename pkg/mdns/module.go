@@ -129,6 +129,7 @@ func isIPProtocol(addr multiaddr.Multiaddr) bool {
 func isPrivateIP(ip net.IP) bool {
 	return ip.IsPrivate() || ip.IsUnspecified()
 }
+
 func (r *PeerRegistry) Print() {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
@@ -137,6 +138,22 @@ func (r *PeerRegistry) Print() {
 		fmt.Printf("[%s] %s\n", id, info.Hostname)
 		for _, addr := range info.AddrInfo.Addrs {
 			fmt.Printf("  └─ %s\n", addr)
+		}
+	}
+	ps := core.Edgehost.Peerstore()
+
+	// 假设我们已经将一些 peer 加入 Peerstore，这里我们可以通过遍历 Peerstore 来查看节点信息
+	// 获取所有存储的 Peer IDs
+	peers := ps.Peers()
+
+	// 遍历每个 peer ID 并打印相关信息
+	for _, pid := range peers {
+		fmt.Println("Peer ID:", pid)
+
+		// 获取 Peer ID 对应的地址列表
+		addresses := ps.Addrs(pid)
+		for _, addr := range addresses {
+			fmt.Println("Peer Address:", addr)
 		}
 	}
 }
