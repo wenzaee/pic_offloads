@@ -6,6 +6,7 @@ import (
 	"net"
 	"pic_offload/pkg/core"
 	"sync"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -21,13 +22,15 @@ type PeerInfo struct {
 
 // PeerRegistry 节点注册中心
 type PeerRegistry struct {
-	peers map[peer.ID]PeerInfo
-	lock  sync.RWMutex
+	peers       map[peer.ID]PeerInfo
+	lock        sync.RWMutex
+	MapNamePeer map[string]peer.ID
 }
 
 func NewRegistry() *PeerRegistry {
 	return &PeerRegistry{
-		peers: make(map[peer.ID]PeerInfo),
+		peers:       make(map[peer.ID]PeerInfo),
+		MapNamePeer: make(map[string]peer.ID),
 	}
 }
 
@@ -37,15 +40,18 @@ func (r *PeerRegistry) AddPeer(pi peer.AddrInfo) {
 	defer r.lock.Unlock()
 
 	filteredAddrs := filterLocalAddresses(pi.Addrs)
+	fmt.Println(filteredAddrs)
 	if len(filteredAddrs) == 0 {
 		return
 	}
+	core.Edgehost.Peerstore().AddAddrs(pi.ID, pi.Addrs, 10*time.Minute)
 
 	hostname, err := core.RequestHostname(ctx, core.Edgehost, pi.ID)
 	if err != nil {
 		fmt.Println("err", err)
 	}
 	fmt.Println("hostname", hostname)
+	r.MapNamePeer[hostname] = pi.ID
 	r.peers[pi.ID] = PeerInfo{
 		Hostname: hostname,
 		AddrInfo: peer.AddrInfo{
@@ -53,6 +59,7 @@ func (r *PeerRegistry) AddPeer(pi peer.AddrInfo) {
 			Addrs: filteredAddrs,
 		},
 	}
+
 }
 
 func (r *PeerRegistry) PrintPeers() {
@@ -67,7 +74,7 @@ func (r *PeerRegistry) PrintPeers() {
 	}
 }
 
-// mdnsNotifee mDNS通知处理器
+// mdnsNotifee  mDNS通知处理器
 type mdnsNotifee struct {
 	PeerChan     chan peer.AddrInfo
 	peerRegistry *PeerRegistry
@@ -75,29 +82,6 @@ type mdnsNotifee struct {
 
 func (n *mdnsNotifee) HandlePeerFound(pi peer.AddrInfo) {
 	n.peerRegistry.AddPeer(pi)
-}
-
-// 获取主机名
-func getHostname(addrs []multiaddr.Multiaddr) string {
-	if len(addrs) == 0 {
-		return "unknown"
-	}
-
-	_, host, err := manet.DialArgs(addrs[0])
-	if err != nil {
-		return "unknown"
-	}
-
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return "unknown"
-	}
-
-	names, _ := net.LookupAddr(ip.String())
-	if len(names) > 0 {
-		return names[0]
-	}
-	return "unknown"
 }
 
 // 地址过滤

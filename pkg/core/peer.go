@@ -7,8 +7,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
-	"net"
 	"os"
 )
 
@@ -60,27 +58,6 @@ func HandleRequest(s network.Stream) {
 	if err != nil {
 		fmt.Println("Error sending hostname:", err)
 	}
-}
-
-// 地址有效性检查
-func isAcceptableAddress(addr multiaddr.Multiaddr) bool {
-	if !isIPProtocol(addr) {
-		return false
-	}
-
-	_, host, err := manet.DialArgs(addr)
-	if err != nil {
-		return false
-	}
-
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-
-	return !ip.IsLoopback() &&
-		!ip.IsLinkLocalUnicast() &&
-		!ip.IsLinkLocalMulticast()
 }
 
 func isIPProtocol(addr multiaddr.Multiaddr) bool {
