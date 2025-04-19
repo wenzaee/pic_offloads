@@ -94,7 +94,9 @@ func (es *ElectionService) Stop() {
 func (es *ElectionService) runElectionLoop() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
-
+	if es.currentEpoch == "init" {
+		es.startElection()
+	}
 	for {
 		select {
 		case <-es.ctx.Done():
@@ -250,7 +252,7 @@ func (es *ElectionService) handleStream(s network.Stream) {
 	defer es.mu.Unlock()
 	log.Println("get a leader", li)
 
-	if es.currentLeader == nil || es.currentEpoch == "init" {
+	if es.currentEpoch == "init" {
 		es.currentLeader = &li
 		es.currentEpoch = li.Epoch
 		log.Printf("接受初始Leader: %s (Epoch: %s)", li.Hostname, li.Epoch)
