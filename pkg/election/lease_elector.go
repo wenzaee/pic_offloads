@@ -1,149 +1,265 @@
-// pkg/election/lease_elector.go
+// 路径：pkg/election/election.go
 package election
 
 import (
 	"context"
+	"encoding/json"
 	"log"
-	"pic_offload/pkg/health"
-	"pic_offload/pkg/mdns"
-	"sort"
+	"os"
 	"sync"
 	"time"
+
+	"pic_offload/pkg/health"
+	"pic_offload/pkg/mdns"
+
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// LeaseElector 基于租期的选举器
-type LeaseElector struct {
-	mu            sync.RWMutex
-	currentLeader string
-	leaseExpiry   time.Time
-	myHostname    string
+const (
+	electionProtocol  = "/leader-election/1.0.0"
+	heartbeatInterval = 5 * time.Second
+	electionTimeout   = 10 * time.Second
+)
+
+// ElectionService 选举服务
+type ElectionService struct {
+	host          host.Host
 	registry      *mdns.PeerRegistry
-
-	config Config
+	currentLeader *LeaderInfo
+	mu            sync.RWMutex
+	electionTimer *time.Timer
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
-type Config struct {
-	ElectionInterval time.Duration // 选举检查间隔
-	LeaseDuration    time.Duration // 租期时长
-	RenewalInterval  time.Duration // 租约续期间隔
+type LeaderInfo struct {
+	PeerID   peer.ID
+	Hostname string
+	Score    float64
+	LastSeen time.Time
 }
 
-func New(hostname string, registry *mdns.PeerRegistry, cfg Config) *LeaseElector {
-	return &LeaseElector{
-		myHostname: hostname,
-		registry:   registry,
-		config:     cfg,
+func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &ElectionService{
+		host:     h,
+		registry: r,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
-// 启动选举守护进程
-func (e *LeaseElector) Run(ctx context.Context) {
-	// 初始等待网络稳定
-	time.Sleep(5 * time.Second)
-
-	// 启动选举循环
-	go e.electionLoop(ctx)
-
-	// 启动租约维护循环
-	go e.leaseMaintenanceLoop(ctx)
+// Start 启动选举服务
+func (es *ElectionService) Start() {
+	es.host.SetStreamHandler(electionProtocol, es.handleStream)
+	go es.runElectionLoop()
+	go es.monitorLeader()
 }
 
-// 选举主循环
-func (e *LeaseElector) electionLoop(ctx context.Context) {
-	ticker := time.NewTicker(e.config.ElectionInterval)
+// Stop 停止服务
+func (es *ElectionService) Stop() {
+	es.cancel()
+	es.host.RemoveStreamHandler(electionProtocol)
+}
+
+func (es *ElectionService) runElectionLoop() {
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-es.ctx.Done():
 			return
 		case <-ticker.C:
-			if e.shouldStartElection() {
-				e.attemptAcquireLeadership()
+			if es.shouldStartElection() {
+				es.startElection()
 			}
 		}
 	}
 }
 
-// 租约维护循环
-func (e *LeaseElector) leaseMaintenanceLoop(ctx context.Context) {
-	ticker := time.NewTicker(e.config.RenewalInterval)
+/*开始选举*/
+func (es *ElectionService) shouldStartElection() bool {
+	es.mu.RLock()
+	defer es.mu.RUnlock()
+
+	return es.currentLeader == nil ||
+		time.Since(es.currentLeader.LastSeen) > electionTimeout ||
+		es.getLocalScore() > es.currentLeader.Score*1.1
+}
+
+// 获取本节点健康评分
+func (es *ElectionService) getLocalScore() float64 {
+	hostName, _ := os.Hostname()
+	healthStatus, exists := health.MapNameHealth[hostName]
+	if !exists {
+		return 0
+	}
+	return healthStatus.HealthScore()
+}
+
+// 启动选举流程
+func (es *ElectionService) startElection() {
+	allPeers := es.getCandidatePeers()
+	if len(allPeers) == 0 {
+		es.declareSelfAsLeader()
+		return
+	}
+
+	var maxScore float64
+	var candidate *LeaderInfo
+
+	// 本地决策选出候选
+	for _, p := range allPeers {
+		if score := p.Score; score > maxScore {
+			maxScore = score
+			candidate = p
+		}
+	}
+
+	// 声明自己为Leader如果得分最高
+	if candidate.PeerID == es.host.ID() {
+		es.declareSelfAsLeader()
+	} else {
+		es.sendVoteRequest(candidate)
+	}
+}
+
+// 获取所有候选节点信息 基于MapNamePeer
+func (es *ElectionService) getCandidatePeers() []*LeaderInfo {
+	es.registry.Lock.RLock()
+	defer es.registry.Lock.RUnlock()
+
+	var peers []*LeaderInfo
+	for hostname, peerID := range es.registry.MapNamePeer {
+		status, exists := health.MapNameHealth[hostname]
+		if !exists {
+			continue
+		}
+
+		peers = append(peers, &LeaderInfo{
+			PeerID:   peerID,
+			Hostname: hostname,
+			Score:    status.HealthScore(),
+			LastSeen: status.LastUpdated,
+		})
+	}
+	return peers
+}
+
+// 声明自己为Leader
+func (es *ElectionService) declareSelfAsLeader() {
+	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	hostname, _ := os.Hostname()
+	es.currentLeader = &LeaderInfo{
+		PeerID:   es.host.ID(),
+		Hostname: hostname,
+		Score:    es.getLocalScore(),
+		LastSeen: time.Now(),
+	}
+
+	log.Printf("🎉 Elected as new leader! Score: %.2f", es.currentLeader.Score)
+	es.broadcastLeaderInfo()
+}
+
+// 广播Leader信息
+func (es *ElectionService) broadcastLeaderInfo() {
+	leaderData, err := json.Marshal(es.currentLeader)
+	if err != nil {
+		log.Printf("Error marshaling leader info: %v", err)
+		return
+	}
+
+	for _, pid := range es.host.Peerstore().Peers() {
+		if pid == es.host.ID() {
+			continue
+		}
+
+		go func(target peer.ID) {
+			ctx, cancel := context.WithTimeout(es.ctx, 3*time.Second)
+			defer cancel()
+
+			s, err := es.host.NewStream(ctx, target, electionProtocol)
+			if err != nil {
+				return
+			}
+			defer s.Close()
+
+			if _, err := s.Write(leaderData); err != nil {
+				log.Printf("Error sending leader info: %v", err)
+			}
+		}(pid)
+	}
+}
+
+// 处理网络流
+func (es *ElectionService) handleStream(s network.Stream) {
+	defer s.Close()
+
+	var li LeaderInfo
+	if err := json.NewDecoder(s).Decode(&li); err != nil {
+		log.Printf("Error decoding leader info: %v", err)
+		return
+	}
+
+	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	if es.currentLeader == nil || li.Score > es.currentLeader.Score {
+		es.currentLeader = &li
+		log.Printf("Updated leader: %s (Score: %.2f)", li.Hostname, li.Score)
+	}
+}
+
+// 监控Leader状态
+func (es *ElectionService) monitorLeader() {
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-es.ctx.Done():
 			return
 		case <-ticker.C:
-			if e.amILeader() && time.Until(e.leaseExpiry) < e.config.RenewalInterval {
-				e.renewLease()
-			}
+			es.checkLeaderStatus()
 		}
 	}
 }
 
-// 判断是否需要发起选举
-func (e *LeaseElector) shouldStartElection() bool {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+func (es *ElectionService) checkLeaderStatus() {
+	es.mu.RLock()
+	current := es.currentLeader
+	es.mu.RUnlock()
 
-	// 当前无领导者或租约过期
-	return e.currentLeader == "" || time.Now().After(e.leaseExpiry)
-}
+	if current == nil {
+		return
+	}
 
-// 尝试获取领导权
-func (e *LeaseElector) attemptAcquireLeadership() {
-	candidates := e.evaluateCandidates()
+	// 如果自己是Leader则发送心跳
+	if current.PeerID == es.host.ID() {
+		es.broadcastLeaderInfo()
+		return
+	}
 
-	// 选择最优候选者
-	if len(candidates) > 0 && candidates[0].Name == e.myHostname {
-		e.mu.Lock()
-		e.currentLeader = e.myHostname
-		e.leaseExpiry = time.Now().Add(e.config.LeaseDuration)
-		e.mu.Unlock()
-		log.Printf("[ELECTION] Acquired leadership until %s", e.leaseExpiry)
+	// 检查Leader存活状态
+	if time.Since(current.LastSeen) > electionTimeout {
+		log.Printf("Leader %s timeout, starting new election", current.Hostname)
+		es.startElection()
 	}
 }
 
-// 评估候选节点
-func (e *LeaseElector) evaluateCandidates() []health.HealthStatus {
-	e.registry.Lock.RLock()
-	defer e.registry.Lock.RUnlock()
+// 发送投票请求
+func (es *ElectionService) sendVoteRequest(candidate *LeaderInfo) {
+	// 实现分布式共识逻辑（示例使用简单直接选择）
+	// 实际生产环境需要实现Raft/Paxos等算法
+	es.mu.Lock()
+	defer es.mu.Unlock()
 
-	var candidates []health.HealthStatus
-	for _, status := range health.MapNameHealth {
-		if status.Usage.Enable && status.SuccessRate() > 0.8 {
-			candidates = append(candidates, status)
-		}
+	if es.currentLeader == nil || candidate.Score > es.currentLeader.Score {
+		es.currentLeader = candidate
 	}
-
-	// 按健康评分排序
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].HealthScore() > candidates[j].HealthScore()
-	})
-
-	return candidates
-}
-
-// 续期租约
-func (e *LeaseElector) renewLease() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	e.leaseExpiry = time.Now().Add(e.config.LeaseDuration)
-	log.Printf("[ELECTION] Renewed lease until %s", e.leaseExpiry)
-}
-
-// 当前是否是领导者
-func (e *LeaseElector) amILeader() bool {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.currentLeader == e.myHostname
-}
-
-// 获取当前领导者
-func (e *LeaseElector) GetLeader() string {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.currentLeader
 }

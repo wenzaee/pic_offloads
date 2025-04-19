@@ -2,18 +2,14 @@ package main
 
 import (
 	"fmt"
-	"golang.org/x/net/context"
+	"github.com/libp2p/go-libp2p"
 	"log"
 	"os"
 	"os/signal"
-	"pic_offload/pkg/election"
-	"pic_offload/pkg/health"
-	"syscall"
-	"time"
-
-	"github.com/libp2p/go-libp2p"
 	"pic_offload/pkg/core"
+	"pic_offload/pkg/election"
 	"pic_offload/pkg/mdns"
+	"syscall"
 )
 
 func main() {
@@ -50,32 +46,9 @@ func main() {
 		log.Fatalf("mDNS service failed: %v", err)
 	}
 
-	electorCfg := election.Config{
-		ElectionInterval: 10 * time.Second,
-		LeaseDuration:    30 * time.Second,
-		RenewalInterval:  5 * time.Second,
-	}
-	hostname, _ := os.Hostname()
-	elector := election.New(hostname, registry, electorCfg)
-	go health.StartHealthMonitor()
-
-	// 启动选举守护进程
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go elector.Run(ctx)
-
-	// 添加选举状态监控
-	go func() {
-		ticker := time.NewTicker(3 * time.Second)
-		for {
-			select {
-			case <-ticker.C:
-				log.Printf("Current leader: %s", elector.GetLeader())
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	electionService := election.NewElectionService(core.Edgehost, registry)
+	electionService.Start()
+	defer electionService.Stop()
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 1)

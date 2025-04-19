@@ -48,7 +48,7 @@ func refreshHealthData() error {
 	defer resp.Body.Close()
 
 	rawData, _ := io.ReadAll(resp.Body)
-	log.Println("it is data", string(rawData))
+	//log.Println("it is data", string(rawData))
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("非200响应: %d, Body: %s", resp.StatusCode, rawData)
 	}
