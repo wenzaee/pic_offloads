@@ -47,13 +47,16 @@ type LeaderInfo struct {
 }
 
 func parseEpochTimestamp(epoch string) (int64, error) {
-	parts := strings.Split(epoch, "-")
+	fmt.Println("epoch is ", epoch)
+	parts := strings.SplitN(epoch, "-", 2) // 只分割一次
 	if len(parts) < 2 {
-		return 0, fmt.Errorf("invalid epoch format")
+		return 0, fmt.Errorf("invalid epoch格式：'%s'", epoch)
 	}
-	timestamp, err := strconv.ParseInt(parts[0], 10, 64)
+
+	timestampStr := parts[0]
+	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("parse timestamp failed: %v", err)
+		return 0, fmt.Errorf("时间戳解析失败：'%s' → %v", timestampStr, err)
 	}
 	return timestamp, nil
 }
@@ -201,6 +204,7 @@ func (es *ElectionService) broadcastLeaderInfo() {
 	}
 
 	leaderData, err := json.Marshal(es.currentLeader)
+	fmt.Println("leaderData", leaderData)
 	if err != nil {
 		log.Printf("[Epoch:%s] Marshal error: %v", es.currentEpoch, err)
 		return
@@ -254,7 +258,7 @@ func (es *ElectionService) handleStream(s network.Stream) {
 
 	currentTimestamp, _ := parseEpochTimestamp(es.currentLeader.Epoch)
 	newTimestamp, _ := parseEpochTimestamp(li.Epoch)
-
+	fmt.Println(newTimestamp, currentTimestamp)
 	// 优先比较epoch新旧
 	if es.currentLeader == nil ||
 		newTimestamp > currentTimestamp {
