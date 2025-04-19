@@ -4,6 +4,7 @@ package election
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -32,22 +33,29 @@ type ElectionService struct {
 	electionTimer *time.Timer
 	ctx           context.Context
 	cancel        context.CancelFunc
+	currentEpoch  string // 新增当前轮次
 }
 
 type LeaderInfo struct {
-	PeerID   peer.ID
-	Hostname string
-	Score    float64
-	LastSeen time.Time
+	Epoch    string    `json:"epoch"`
+	PeerID   peer.ID   `json:"peerId"`
+	Hostname string    `json:"hostname"`
+	Score    float64   `json:"score"`
+	LastSeen time.Time `json:"lastSeen"`
+}
+
+func (es *ElectionService) generateEpoch() string {
+	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), es.host.ID())
 }
 
 func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ElectionService{
-		host:     h,
-		registry: r,
-		ctx:      ctx,
-		cancel:   cancel,
+		host:         h,
+		registry:     r,
+		ctx:          ctx,
+		cancel:       cancel,
+		currentEpoch: "init",
 	}
 }
 
@@ -102,6 +110,7 @@ func (es *ElectionService) getLocalScore() float64 {
 
 // 启动选举流程
 func (es *ElectionService) startElection() {
+	log.Printf("🏁 [Epoch:%s] Starting new election", es.currentEpoch)
 	allPeers := es.getCandidatePeers()
 	if len(allPeers) == 0 {
 		es.declareSelfAsLeader()
@@ -155,24 +164,32 @@ func (es *ElectionService) declareSelfAsLeader() {
 	defer es.mu.Unlock()
 
 	hostname, _ := os.Hostname()
+	newEpoch := es.generateEpoch()
 	es.currentLeader = &LeaderInfo{
 		PeerID:   es.host.ID(),
 		Hostname: hostname,
 		Score:    es.getLocalScore(),
 		LastSeen: time.Now(),
 	}
+	es.currentEpoch = newEpoch
 
-	log.Printf("🎉 Elected as new leader! Score: %.2f", es.currentLeader.Score)
+	log.Printf("🎉 [Epoch:%s] Elected as new leader! Score: %.2f",
+		newEpoch, es.currentLeader.Score)
 	es.broadcastLeaderInfo()
 }
 
 // 广播Leader信息
 func (es *ElectionService) broadcastLeaderInfo() {
-	leaderData, err := json.Marshal(es.currentLeader)
-	if err != nil {
-		log.Printf("Error marshaling leader info: %v", err)
+	if es.currentLeader == nil {
 		return
 	}
+
+	leaderData, err := json.Marshal(es.currentLeader)
+	if err != nil {
+		log.Printf("[Epoch:%s] Marshal error: %v", es.currentEpoch, err)
+		return
+	}
+	log.Printf("📢 [Epoch:%s] Broadcasting leader info", es.currentEpoch)
 
 	for _, pid := range es.host.Peerstore().Peers() {
 		if pid == es.host.ID() {
@@ -190,7 +207,7 @@ func (es *ElectionService) broadcastLeaderInfo() {
 			defer s.Close()
 
 			if _, err := s.Write(leaderData); err != nil {
-				log.Printf("Error sending leader info: %v", err)
+				log.Printf("[Epoch:%s] Send error: %v", es.currentEpoch, err)
 			}
 		}(pid)
 	}
@@ -202,16 +219,22 @@ func (es *ElectionService) handleStream(s network.Stream) {
 
 	var li LeaderInfo
 	if err := json.NewDecoder(s).Decode(&li); err != nil {
-		log.Printf("Error decoding leader info: %v", err)
+		log.Printf("[Epoch:%s] Decode error: %v", es.currentEpoch, err)
 		return
 	}
 
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
-	if es.currentLeader == nil || li.Score > es.currentLeader.Score {
+	// 优先比较epoch新旧
+	if es.currentLeader == nil ||
+		li.Epoch > es.currentLeader.Epoch ||
+		(li.Epoch == es.currentLeader.Epoch && li.Score > es.currentLeader.Score) {
+
 		es.currentLeader = &li
-		log.Printf("Updated leader: %s (Score: %.2f)", li.Hostname, li.Score)
+		es.currentEpoch = li.Epoch
+		log.Printf("🔄 [Epoch:%s] Updated leader: %s (Score: %.2f)",
+			li.Epoch, li.Hostname, li.Score)
 	}
 }
 
@@ -236,18 +259,19 @@ func (es *ElectionService) checkLeaderStatus() {
 	es.mu.RUnlock()
 
 	if current == nil {
+		log.Printf("[Epoch:%s] No active leader", es.currentEpoch)
 		return
 	}
 
-	// 如果自己是Leader则发送心跳
 	if current.PeerID == es.host.ID() {
+		log.Printf("[Epoch:%s] Sending heartbeat", es.currentEpoch)
 		es.broadcastLeaderInfo()
 		return
 	}
 
-	// 检查Leader存活状态
 	if time.Since(current.LastSeen) > electionTimeout {
-		log.Printf("Leader %s timeout, starting new election", current.Hostname)
+		log.Printf("[Epoch:%s] Leader timeout, last seen: %v",
+			es.currentEpoch, current.LastSeen)
 		es.startElection()
 	}
 }
