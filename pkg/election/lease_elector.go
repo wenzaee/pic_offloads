@@ -191,14 +191,15 @@ func (es *ElectionService) broadcastLeaderInfo() {
 		log.Printf("[Epoch:%s] Marshal error: %v", es.currentEpoch, err)
 		return
 	}
-	tarGetname := es.registry.Peers[es.host.ID()].Hostname
-	log.Printf("📢 [Epoch:%s] Broadcasting leader info", es.currentEpoch, tarGetname)
+
+	log.Printf("📢 [Epoch:%s] Broadcasting leader info", es.currentEpoch)
 
 	for _, pid := range es.host.Peerstore().Peers() {
 		if pid == es.host.ID() {
 			continue
 		}
-		log.Println("will send to", pid)
+		tarGetname := es.registry.Peers[pid].Hostname
+		log.Println("will send to", pid, tarGetname)
 		go func(target peer.ID) {
 			ctx, cancel := context.WithTimeout(es.ctx, 3*time.Second)
 			defer cancel()
@@ -228,7 +229,7 @@ func (es *ElectionService) handleStream(s network.Stream) {
 
 	es.mu.Lock()
 	defer es.mu.Unlock()
-
+	log.Println("get a leader")
 	// 优先比较epoch新旧
 	if es.currentLeader == nil ||
 		li.Epoch > es.currentLeader.Epoch ||
