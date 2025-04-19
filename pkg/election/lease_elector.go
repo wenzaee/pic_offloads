@@ -23,7 +23,7 @@ import (
 const (
 	electionProtocol  = "/leader-election/1.0.0"
 	heartbeatInterval = 5 * time.Second
-	electionTimeout   = 10 * time.Second
+	electionTimeout   = 60 * time.Second
 )
 
 // ElectionService 选举服务
