@@ -96,8 +96,7 @@ func (es *ElectionService) shouldStartElection() bool {
 	defer es.mu.RUnlock()
 
 	return es.currentLeader == nil ||
-		time.Since(es.currentLeader.LastSeen) > electionTimeout ||
-		es.getLocalScore() > es.currentLeader.Score*1.1
+		time.Since(es.currentLeader.LastSeen) > electionTimeout
 }
 
 // 获取本节点健康评分
@@ -107,6 +106,7 @@ func (es *ElectionService) getLocalScore() float64 {
 	if !exists {
 		return 0
 	}
+	log.Println("get host socre:", healthStatus.HealthScore())
 	return healthStatus.HealthScore()
 }
 
@@ -197,7 +197,7 @@ func (es *ElectionService) broadcastLeaderInfo() {
 		if pid == es.host.ID() {
 			continue
 		}
-
+		log.Println("will send to", pid)
 		go func(target peer.ID) {
 			ctx, cancel := context.WithTimeout(es.ctx, 3*time.Second)
 			defer cancel()
