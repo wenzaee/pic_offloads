@@ -191,7 +191,8 @@ func (es *ElectionService) broadcastLeaderInfo() {
 		log.Printf("[Epoch:%s] Marshal error: %v", es.currentEpoch, err)
 		return
 	}
-	log.Printf("📢 [Epoch:%s] Broadcasting leader info", es.currentEpoch)
+	tarGetname := es.registry.Peers[es.host.ID()].Hostname
+	log.Printf("📢 [Epoch:%s] Broadcasting leader info", es.currentEpoch, tarGetname)
 
 	for _, pid := range es.host.Peerstore().Peers() {
 		if pid == es.host.ID() {
