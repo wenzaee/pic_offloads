@@ -189,8 +189,8 @@ func (es *ElectionService) declareSelfAsLeader() {
 		Hostname: hostname,
 		Score:    es.getLocalScore(),
 		LastSeen: time.Now(),
+		Epoch:    newEpoch,
 	}
-	es.currentEpoch = newEpoch
 
 	log.Printf("🎉 [Epoch:%s] Elected as new leader! Score: %.2f",
 		newEpoch, es.currentLeader.Score)
@@ -204,7 +204,7 @@ func (es *ElectionService) broadcastLeaderInfo() {
 	}
 
 	leaderData, err := json.Marshal(es.currentLeader)
-	fmt.Println("leaderData", leaderData)
+
 	if err != nil {
 		log.Printf("[Epoch:%s] Marshal error: %v", es.currentEpoch, err)
 		return
@@ -247,7 +247,7 @@ func (es *ElectionService) handleStream(s network.Stream) {
 
 	es.mu.Lock()
 	defer es.mu.Unlock()
-	log.Println("get a leader")
+	log.Println("get a leader", li)
 
 	if es.currentLeader == nil || es.currentEpoch == "init" {
 		es.currentLeader = &li
@@ -255,7 +255,7 @@ func (es *ElectionService) handleStream(s network.Stream) {
 		log.Printf("接受初始Leader: %s (Epoch: %s)", li.Hostname, li.Epoch)
 		return
 	}
-
+	fmt.Println("leaderData", li.Epoch)
 	currentTimestamp, _ := parseEpochTimestamp(es.currentLeader.Epoch)
 	newTimestamp, _ := parseEpochTimestamp(li.Epoch)
 	fmt.Println(newTimestamp, currentTimestamp)
