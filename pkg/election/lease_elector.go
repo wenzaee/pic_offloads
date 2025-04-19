@@ -45,7 +45,9 @@ type LeaderInfo struct {
 }
 
 func (es *ElectionService) generateEpoch() string {
-	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), es.host.ID())
+	Hostname := es.registry.Peers[es.host.ID()].Hostname
+
+	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), Hostname)
 }
 
 func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {

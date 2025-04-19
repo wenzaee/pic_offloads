@@ -24,14 +24,14 @@ type PeerInfo struct {
 
 // PeerRegistry 节点注册中心
 type PeerRegistry struct {
-	peers       map[peer.ID]PeerInfo
+	Peers       map[peer.ID]PeerInfo
 	Lock        sync.RWMutex
 	MapNamePeer map[string]peer.ID
 }
 
 func NewRegistry() *PeerRegistry {
 	return &PeerRegistry{
-		peers:       make(map[peer.ID]PeerInfo),
+		Peers:       make(map[peer.ID]PeerInfo),
 		MapNamePeer: make(map[string]peer.ID),
 	}
 }
@@ -54,7 +54,7 @@ func (r *PeerRegistry) AddPeer(pi peer.AddrInfo) {
 	}
 	fmt.Println("hostname", hostname)
 	r.MapNamePeer[hostname] = pi.ID
-	r.peers[pi.ID] = PeerInfo{
+	r.Peers[pi.ID] = PeerInfo{
 		Hostname: hostname,
 		AddrInfo: peer.AddrInfo{
 			ID:    pi.ID,
@@ -68,7 +68,7 @@ func (r *PeerRegistry) PrintPeers() {
 	r.Lock.RLock()
 	defer r.Lock.RUnlock()
 
-	for id, info := range r.peers {
+	for id, info := range r.Peers {
 		fmt.Printf("Peer %s (%s):\n", id, info.Hostname)
 		for _, addr := range info.AddrInfo.Addrs {
 			fmt.Printf("  - %s\n", addr)
@@ -126,7 +126,7 @@ func (r *PeerRegistry) Print() {
 	r.Lock.RLock()
 	defer r.Lock.RUnlock()
 
-	for id, info := range r.peers {
+	for id, info := range r.Peers {
 		fmt.Printf("[%s] %s\n", id, info.Hostname)
 		for _, addr := range info.AddrInfo.Addrs {
 			fmt.Printf("  └─ %s\n", addr)
