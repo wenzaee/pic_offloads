@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,10 +46,22 @@ type LeaderInfo struct {
 	LastSeen time.Time `json:"lastSeen"`
 }
 
-func (es *ElectionService) generateEpoch() string {
-	Hostname := es.registry.Peers[es.host.ID()].Hostname
+func parseEpochTimestamp(epoch string) (int64, error) {
+	parts := strings.Split(epoch, "-")
+	if len(parts) < 2 {
+		return 0, fmt.Errorf("invalid epoch format")
+	}
+	timestamp, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse timestamp failed: %v", err)
+	}
+	return timestamp, nil
+}
 
-	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), Hostname)
+func (es *ElectionService) generateEpoch() string {
+	hostname, _ := os.Hostname()
+
+	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), hostname)
 }
 
 func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
@@ -199,7 +213,7 @@ func (es *ElectionService) broadcastLeaderInfo() {
 			continue
 		}
 		tarGetname := es.registry.Peers[pid].Hostname
-		log.Println("will send to", pid, tarGetname)
+		log.Println("will send to", pid, tarGetname, "leader", es.currentLeader.Hostname)
 		go func(target peer.ID) {
 			ctx, cancel := context.WithTimeout(es.ctx, 3*time.Second)
 			defer cancel()
@@ -230,10 +244,20 @@ func (es *ElectionService) handleStream(s network.Stream) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	log.Println("get a leader")
+
+	if es.currentLeader == nil || es.currentEpoch == "init" {
+		es.currentLeader = &li
+		es.currentEpoch = li.Epoch
+		log.Printf("接受初始Leader: %s (Epoch: %s)", li.Hostname, li.Epoch)
+		return
+	}
+
+	currentTimestamp, _ := parseEpochTimestamp(es.currentLeader.Epoch)
+	newTimestamp, _ := parseEpochTimestamp(li.Epoch)
+
 	// 优先比较epoch新旧
 	if es.currentLeader == nil ||
-		li.Epoch > es.currentLeader.Epoch ||
-		(li.Epoch == es.currentLeader.Epoch && li.Score > es.currentLeader.Score) {
+		newTimestamp > currentTimestamp {
 
 		es.currentLeader = &li
 		es.currentEpoch = li.Epoch
