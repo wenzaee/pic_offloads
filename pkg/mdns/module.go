@@ -20,10 +20,12 @@ type PeerInfo struct {
 	Protocols []string
 }
 
+// 最终需要的映射表
+
 // PeerRegistry 节点注册中心
 type PeerRegistry struct {
 	peers       map[peer.ID]PeerInfo
-	lock        sync.RWMutex
+	Lock        sync.RWMutex
 	MapNamePeer map[string]peer.ID
 }
 
@@ -36,15 +38,15 @@ func NewRegistry() *PeerRegistry {
 
 func (r *PeerRegistry) AddPeer(pi peer.AddrInfo) {
 	ctx := context.Background()
-	r.lock.Lock()
-	defer r.lock.Unlock()
+	r.Lock.Lock()
+	defer r.Lock.Unlock()
 
 	filteredAddrs := filterLocalAddresses(pi.Addrs)
 	fmt.Println(filteredAddrs)
 	if len(filteredAddrs) == 0 {
 		return
 	}
-	core.Edgehost.Peerstore().AddAddrs(pi.ID, pi.Addrs, 10*time.Minute)
+	core.Edgehost.Peerstore().AddAddrs(pi.ID, pi.Addrs, 5*time.Second)
 
 	hostname, err := core.RequestHostname(ctx, core.Edgehost, pi.ID)
 	if err != nil {
@@ -63,8 +65,8 @@ func (r *PeerRegistry) AddPeer(pi peer.AddrInfo) {
 }
 
 func (r *PeerRegistry) PrintPeers() {
-	r.lock.RLock()
-	defer r.lock.RUnlock()
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
 
 	for id, info := range r.peers {
 		fmt.Printf("Peer %s (%s):\n", id, info.Hostname)
@@ -72,16 +74,6 @@ func (r *PeerRegistry) PrintPeers() {
 			fmt.Printf("  - %s\n", addr)
 		}
 	}
-}
-
-// mdnsNotifee  mDNS通知处理器
-type mdnsNotifee struct {
-	PeerChan     chan peer.AddrInfo
-	peerRegistry *PeerRegistry
-}
-
-func (n *mdnsNotifee) HandlePeerFound(pi peer.AddrInfo) {
-	n.peerRegistry.AddPeer(pi)
 }
 
 // 地址过滤
@@ -131,8 +123,8 @@ func isPrivateIP(ip net.IP) bool {
 }
 
 func (r *PeerRegistry) Print() {
-	r.lock.RLock()
-	defer r.lock.RUnlock()
+	r.Lock.RLock()
+	defer r.Lock.RUnlock()
 
 	for id, info := range r.peers {
 		fmt.Printf("[%s] %s\n", id, info.Hostname)

@@ -6,7 +6,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
 	"os"
 )
 
@@ -58,13 +57,4 @@ func HandleRequest(s network.Stream) {
 	if err != nil {
 		fmt.Println("Error sending hostname:", err)
 	}
-}
-
-func isIPProtocol(addr multiaddr.Multiaddr) bool {
-	for _, proto := range addr.Protocols() {
-		if proto.Code == multiaddr.P_IP4 || proto.Code == multiaddr.P_IP6 {
-			return true
-		}
-	}
-	return false
 }

@@ -18,7 +18,7 @@ func NewService(cfg Config) *Service {
 		service: mdns.NewMdnsService(
 			cfg.Host,
 			cfg.Rendezvous,
-			&notifee{registry: cfg.Registry}, // 必须传递指针
+			&notifier{registry: cfg.Registry}, // 必须传递指针
 		),
 	}
 }
@@ -28,11 +28,11 @@ func (s *Service) Start() error {
 	return s.service.Start()
 }
 
-type notifee struct {
+type notifier struct {
 	registry RegistryInterface
 }
 
-func (n *notifee) HandlePeerFound(pi peer.AddrInfo) {
+func (n *notifier) HandlePeerFound(pi peer.AddrInfo) {
 	fmt.Printf("[DEBUG] Found peer: %s\n", pi.ID)
 	n.registry.AddPeer(pi)
 }
