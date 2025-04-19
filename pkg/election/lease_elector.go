@@ -191,6 +191,7 @@ func (es *ElectionService) declareSelfAsLeader() {
 		LastSeen: time.Now(),
 		Epoch:    newEpoch,
 	}
+	es.currentEpoch = newEpoch
 
 	log.Printf("🎉 [Epoch:%s] Elected as new leader! Score: %.2f",
 		newEpoch, es.currentLeader.Score)
