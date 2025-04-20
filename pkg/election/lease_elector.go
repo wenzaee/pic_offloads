@@ -139,7 +139,7 @@ func (es *ElectionService) startElection() {
 	fmt.Println("all peers ", allPeers)
 	var maxScore float64 = allPeers[0].Score
 	var candidate *LeaderInfo = allPeers[0]
-	
+
 	// 本地决策选出候选
 	for _, p := range allPeers {
 		if score := p.Score; score > maxScore {
@@ -153,6 +153,7 @@ func (es *ElectionService) startElection() {
 	if candidate.PeerID == es.host.ID() {
 		es.declareSelfAsLeader()
 	} else {
+		log.Println("i want elect", candidate.Hostname)
 		es.sendVoteRequest(candidate)
 	}
 }
