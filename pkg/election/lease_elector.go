@@ -223,6 +223,7 @@ func (es *ElectionService) monitorLeader() {
 func (es *ElectionService) higherPriorityPeers() []peer.ID {
 	all := es.h.Peerstore().Peers()
 	sort.Sort(all) // peer.IDSlice implements sort.Interface
+	log.Println("all:", all)
 	self := es.h.ID()
 
 	var higher []peer.ID
