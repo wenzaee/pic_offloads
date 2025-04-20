@@ -223,6 +223,7 @@ func (es *ElectionService) higherPriorityHosts() []string {
 	var hosts []string
 	for name := range es.registry.MapNamePeer {
 		hosts = append(hosts, name)
+		log.Println("append", name)
 	}
 	sort.Strings(hosts)
 	selfHost, _ := os.Hostname()
