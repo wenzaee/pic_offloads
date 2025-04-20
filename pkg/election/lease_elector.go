@@ -136,7 +136,7 @@ func (es *ElectionService) startElection() {
 		es.declareSelfAsLeader()
 		return
 	}
-
+	fmt.Println("all peers ", allPeers)
 	var maxScore float64
 	var candidate *LeaderInfo
 
