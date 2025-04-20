@@ -409,7 +409,7 @@ func (es *ElectionService) handleeliction(s network.Stream) {
 		resp.Accepted = true
 		es.declareSelfAsLeader() // 候选者立即自声明
 	}
-
+	fmt.Println("answer ", resp)
 	if err := json.NewEncoder(s).Encode(resp); err != nil {
 		log.Printf("发送响应失败: %v", err)
 	}
