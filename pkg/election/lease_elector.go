@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	electionProtocol  = "/leader-election/1.0.0"
-	heartbeatInterval = 5 * time.Second
-	electionTimeout   = 30 * time.Second
+	electionProtocol       = "/leader-election/1.0.0"
+	electionothersProtocol = "/leader-election-others/1.0.0"
+	heartbeatInterval      = 5 * time.Second
+	electionTimeout        = 30 * time.Second
 )
 
 // ElectionService 选举服务
@@ -77,9 +78,20 @@ func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
 	}
 }
 
+type ElectionRequest struct {
+	Candidate    LeaderInfo `json:"candidate"`
+	RequestEpoch string     `json:"epoch"`
+}
+
+type ElectionResponse struct {
+	Accepted     bool   `json:"accepted"`
+	CurrentEpoch string `json:"current_epoch"`
+}
+
 // Start 启动选举服务
 func (es *ElectionService) Start() {
 	es.host.SetStreamHandler(electionProtocol, es.handleStream)
+	es.host.SetStreamHandler(electionothersProtocol, es.handleeliction)
 	go es.runElectionLoop()
 	go es.monitorLeader()
 }
@@ -155,6 +167,7 @@ func (es *ElectionService) startElection() {
 	} else {
 		log.Println("i want elect", candidate.Hostname)
 		es.sendVoteRequest(candidate)
+
 	}
 }
 
@@ -314,15 +327,90 @@ func (es *ElectionService) checkLeaderStatus() {
 		es.startElection()
 	}
 }
+func compareEpoch(epochNet string, epochNow string) bool {
+	currentTimestamp, _ := parseEpochTimestamp(epochNet)
+	newTimestamp, _ := parseEpochTimestamp(epochNow)
+
+	return newTimestamp > currentTimestamp
+}
 
 // 发送投票请求
 func (es *ElectionService) sendVoteRequest(candidate *LeaderInfo) {
-	// 实现分布式共识逻辑（示例使用简单直接选择）
-	// 实际生产环境需要实现Raft/Paxos等算法
+	// 仅与目标候选者通信
+	s, err := es.host.NewStream(context.Background(), candidate.PeerID, electionothersProtocol)
+	if err != nil {
+		log.Printf("连接候选者 %s 失败: %v", candidate.Hostname, err)
+		return
+	}
+	defer s.Close()
+
+	// 构造请求
+	req := ElectionRequest{
+		Candidate:    *candidate,
+		RequestEpoch: es.generateEpoch(),
+	}
+
+	// 发送请求（带超时）
+	if err := s.SetWriteDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		return
+	}
+	if err := json.NewEncoder(s).Encode(req); err != nil {
+		log.Printf("发送选举请求失败: %v", err)
+		return
+	}
+
+	// 接收响应（带超时）
+	if err := s.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		return
+	}
+	var resp ElectionResponse
+	if err := json.NewDecoder(s).Decode(&resp); err != nil {
+		log.Printf("读取响应失败: %v", err)
+		return
+	}
+
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
-	if es.currentLeader == nil || candidate.Score > es.currentLeader.Score {
+	// 处理响应
+	if resp.Accepted {
+		log.Printf("✅ 候选者 %s 接受成为Leader", candidate.Hostname)
+		
 		es.currentLeader = candidate
+
+	} else {
+		log.Printf("❌ 候选者 %s 拒绝选举请求", candidate.Hostname)
+		// 同步更高Epoch
+		if compareEpoch(resp.CurrentEpoch, es.currentEpoch) == true {
+			es.currentEpoch = resp.CurrentEpoch
+		}
+	}
+}
+func (es *ElectionService) handleeliction(s network.Stream) {
+	defer s.Close()
+
+	var req ElectionRequest
+	if err := json.NewDecoder(s).Decode(&req); err != nil {
+		log.Printf("解码选举请求失败: %v", err)
+		return
+	}
+
+	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	resp := ElectionResponse{
+		CurrentEpoch: es.currentEpoch,
+	}
+
+	// 决策条件
+	if compareEpoch(req.RequestEpoch, es.currentEpoch) == true & {
+		// 接受成为Leader
+		resp.Accepted = true
+		es.currentEpoch = req.RequestEpoch
+		es.declareSelfAsLeader() // 候选者立即自声明
+	}
+
+	if err := json.NewEncoder(s).Encode(resp); err != nil {
+		log.Printf("发送响应失败: %v", err)
 	}
 }
