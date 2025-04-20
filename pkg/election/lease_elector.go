@@ -3,415 +3,244 @@ package election
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
-	"os"
-	"strconv"
-	"strings"
+	"sort"
 	"sync"
 	"time"
 
-	"pic_offload/pkg/health"
 	"pic_offload/pkg/mdns"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
+import lp2pProto "github.com/libp2p/go-libp2p/core/protocol"
 
 const (
-	electionProtocol       = "/leader-election/1.0.0"
-	electionothersProtocol = "/leader-election-others/1.0.0"
-	heartbeatInterval      = 5 * time.Second
-	electionTimeout        = 30 * time.Second
+	protoElection    = "/bully/election/1.0.0"
+	protoCoordinator = "/bully/coord/1.0.0"
+
+	heartbeatInterval = 5 * time.Second  // Leader → All
+	leaderTimeout     = 15 * time.Second // Follower检测Leader
 )
 
-// ElectionService 选举服务
 type ElectionService struct {
-	host          host.Host
-	registry      *mdns.PeerRegistry
-	currentLeader *LeaderInfo
-	mu            sync.RWMutex
-	electionTimer *time.Timer
-	ctx           context.Context
-	cancel        context.CancelFunc
-	currentEpoch  string // 新增当前轮次
-}
+	h        host.Host
+	registry *mdns.PeerRegistry
 
-type LeaderInfo struct {
-	Epoch    string    `json:"epoch"`
-	PeerID   peer.ID   `json:"peerId"`
-	Hostname string    `json:"hostname"`
-	Score    float64   `json:"score"`
-	LastSeen time.Time `json:"lastSeen"`
-}
-
-func parseEpochTimestamp(epoch string) (int64, error) {
-	fmt.Println("epoch is ", epoch)
-	parts := strings.SplitN(epoch, "-", 2) // 只分割一次
-	if len(parts) < 2 {
-		return 0, fmt.Errorf("invalid epoch格式：'%s'", epoch)
-	}
-
-	timestampStr := parts[0]
-	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("时间戳解析失败：'%s' → %v", timestampStr, err)
-	}
-	return timestamp, nil
-}
-
-func (es *ElectionService) generateEpoch() string {
-	hostname, _ := os.Hostname()
-
-	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), hostname)
+	mu           sync.RWMutex
+	leader       peer.ID
+	leaderSeen   time.Time
+	inElection   bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	stopHB       context.CancelFunc // 心跳 goroutine 关闭句柄
+	listenCancel context.CancelFunc // proto 句柄注销
 }
 
 func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ElectionService{
-		host:         h,
-		registry:     r,
-		ctx:          ctx,
-		cancel:       cancel,
-		currentEpoch: "init",
+		h:        h,
+		registry: r,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
-type ElectionRequest struct {
-	Candidate    LeaderInfo `json:"candidate"`
-	RequestEpoch string     `json:"epoch"`
-}
+// -------------------- Public API --------------------
 
-type ElectionResponse struct {
-	Accepted     bool   `json:"accepted"`
-	CurrentEpoch string `json:"current_epoch"`
-}
-
-// Start 启动选举服务
 func (es *ElectionService) Start() {
-	es.host.SetStreamHandler(electionProtocol, es.handleStream)
-	es.host.SetStreamHandler(electionothersProtocol, es.handleeliction)
-	go es.runElectionLoop()
+	// 流处理
+	es.h.SetStreamHandler(protoElection, es.handleElection)
+	es.h.SetStreamHandler(protoCoordinator, es.handleCoordinator)
+
 	go es.monitorLeader()
+	// 初始发起一次选举（可延时 2s，防止其他节点还未就绪）
+	time.AfterFunc(2*time.Second, es.startElection)
 }
 
-// Stop 停止服务
 func (es *ElectionService) Stop() {
 	es.cancel()
-	es.host.RemoveStreamHandler(electionProtocol)
+	es.h.RemoveStreamHandler(protoElection)
+	es.h.RemoveStreamHandler(protoCoordinator)
+	if es.stopHB != nil {
+		es.stopHB()
+	}
 }
 
-func (es *ElectionService) runElectionLoop() {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-	if es.currentEpoch == "init" {
-		es.startElection()
+// -------------------- Bully 核心逻辑 --------------------
+
+func (es *ElectionService) startElection() {
+	es.mu.Lock()
+	if es.inElection {
+		es.mu.Unlock()
+		return
 	}
+	es.inElection = true
+	es.mu.Unlock()
+
+	log.Printf("🔔 [%s] Start ELECTION", short(es.h.ID()))
+	higherPeers := es.higherPriorityPeers()
+	if len(higherPeers) == 0 {
+		es.becomeLeader()
+		return
+	}
+
+	// 并行向更高优先级节点发送 ELECTION
+	var wg sync.WaitGroup
+	okCh := make(chan struct{}, len(higherPeers))
+	for _, pid := range higherPeers {
+		wg.Add(1)
+		go func(p peer.ID) {
+			defer wg.Done()
+			if es.sendMsg(p, protoElection, "ELECTION") {
+				okCh <- struct{}{}
+			}
+		}(pid)
+	}
+	wg.Wait()
+	close(okCh)
+
+	if len(okCh) == 0 {
+		// 没人回应，做老大
+		es.becomeLeader()
+		return
+	}
+	// 收到 OK，等待 Coordinator
+	log.Printf("⏳ [%s] Waiting COORDINATOR ...", short(es.h.ID()))
+}
+
+func (es *ElectionService) handleElection(s network.Stream) {
+	defer s.Close()
+
+	remote := s.Conn().RemotePeer()
+	log.Printf("📨 [%s] <- ELECTION from %s", short(es.h.ID()), short(remote))
+
+	// 1. 回复 OK
+	_ = es.sendMsg(remote, protoElection, "OK")
+
+	// 2. 如果自己还没在选举，立刻发起一次
+	es.startElection()
+}
+
+func (es *ElectionService) handleCoordinator(s network.Stream) {
+	defer s.Close()
+
+	var msg string
+	if err := json.NewDecoder(s).Decode(&msg); err != nil || msg != "COORDINATOR" {
+		return
+	}
+	remote := s.Conn().RemotePeer()
+
+	es.mu.Lock()
+	es.leader = remote
+	es.leaderSeen = time.Now()
+	es.inElection = false
+	es.mu.Unlock()
+
+	log.Printf("👑 [%s] Accept COORDINATOR %s", short(es.h.ID()), short(remote))
+}
+
+func (es *ElectionService) becomeLeader() {
+	es.mu.Lock()
+	es.leader = es.h.ID()
+	es.leaderSeen = time.Now()
+	es.inElection = false
+	es.mu.Unlock()
+
+	log.Printf("🥳 [%s] I am the new LEADER", short(es.h.ID()))
+	es.broadcast(protoCoordinator, "COORDINATOR")
+	es.startHeartbeat()
+}
+
+// -------------------- Heartbeat --------------------
+
+func (es *ElectionService) startHeartbeat() {
+	// 关闭旧 goroutine
+	if es.stopHB != nil {
+		es.stopHB()
+	}
+	ctx, cancel := context.WithCancel(es.ctx)
+	es.stopHB = cancel
+
+	go func() {
+		t := time.NewTicker(heartbeatInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				es.broadcast(protoCoordinator, "COORDINATOR")
+			}
+		}
+	}()
+}
+
+func (es *ElectionService) monitorLeader() {
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
 	for {
 		select {
 		case <-es.ctx.Done():
 			return
-		case <-ticker.C:
-			if es.shouldStartElection() {
+		case <-t.C:
+			es.mu.RLock()
+			ld := es.leader
+			seen := es.leaderSeen
+			es.mu.RUnlock()
+
+			if ld == "" || time.Since(seen) > leaderTimeout {
+				log.Printf("⚠️  [%s] Leader lost, restart election", short(es.h.ID()))
 				es.startElection()
 			}
 		}
 	}
 }
 
-/*开始选举*/
-func (es *ElectionService) shouldStartElection() bool {
-	es.mu.RLock()
-	defer es.mu.RUnlock()
+// -------------------- Utility --------------------
 
-	return es.currentLeader == nil ||
-		time.Since(es.currentLeader.LastSeen) > electionTimeout
-}
-
-// 获取本节点健康评分
-func (es *ElectionService) getLocalScore() float64 {
-	hostName, _ := os.Hostname()
-	healthStatus, exists := health.MapNameHealth[hostName]
-	if !exists {
-		return 0
-	}
-	log.Println("get host socre:", healthStatus.HealthScore())
-	return healthStatus.HealthScore()
-}
-
-// 启动选举流程
-func (es *ElectionService) startElection() {
-	log.Printf("🏁 [Epoch:%s] Starting new election", es.currentEpoch)
-	allPeers := es.getCandidatePeers()
-	if len(allPeers) == 0 {
-		es.declareSelfAsLeader()
-		return
-	}
-	fmt.Println("all peers ", allPeers)
-	var maxScore float64 = allPeers[0].Score
-	var candidate *LeaderInfo = allPeers[0]
-
-	// 本地决策选出候选
-	for _, p := range allPeers {
-		if score := p.Score; score > maxScore {
-			maxScore = score
-			candidate = p
+func (es *ElectionService) higherPriorityPeers() []peer.ID {
+	all := es.h.Peerstore().Peers()
+	self := es.h.ID().String()
+	sort.Sort(all)
+	var higher []peer.ID
+	for _, p := range all {
+		if p.String() > self { // 优先级：peer.ID 字面值更大
+			higher = append(higher, p)
 		}
 	}
-	fmt.Printf("candidate.PeerID", candidate.PeerID)
-	fmt.Println("es.host.ID()", es.host.ID())
-	// 声明自己为Leader如果得分最高
-	if candidate.PeerID == es.host.ID() {
-		es.declareSelfAsLeader()
-	} else {
-		log.Println("i want elect", candidate.Hostname)
-		es.sendVoteRequest(candidate)
-
-	}
+	return higher
 }
 
-// 获取所有候选节点信息 基于MapNamePeer
-func (es *ElectionService) getCandidatePeers() []*LeaderInfo {
-	es.registry.Lock.RLock()
-	defer es.registry.Lock.RUnlock()
-	health.RefreshHealthData()
-	fmt.Println("health", health.MapNameHealth)
-	var peers []*LeaderInfo
-	for hostname, peerID := range es.registry.MapNamePeer {
-		fmt.Println("add a peer", hostname, peerID)
-		status, exists := health.MapNameHealth[hostname]
-
-		if !exists {
+func (es *ElectionService) broadcast(protocol string, payload string) {
+	for _, pid := range es.h.Peerstore().Peers() {
+		if pid == es.h.ID() {
 			continue
 		}
-
-		peers = append(peers, &LeaderInfo{
-			PeerID:   peerID,
-			Hostname: hostname,
-			Score:    status.HealthScore(),
-			LastSeen: status.LastUpdated,
-		})
+		es.sendMsg(pid, protocol, payload)
 	}
-	return peers
 }
 
-// 声明自己为Leader
-func (es *ElectionService) declareSelfAsLeader() {
-	es.mu.Lock()
-	defer es.mu.Unlock()
-
-	hostname, _ := os.Hostname()
-	newEpoch := es.generateEpoch()
-	es.currentLeader = &LeaderInfo{
-		PeerID:   es.host.ID(),
-		Hostname: hostname,
-		Score:    es.getLocalScore(),
-		LastSeen: time.Now(),
-		Epoch:    newEpoch,
-	}
-	es.currentEpoch = newEpoch
-
-	log.Printf("🎉 [Epoch:%s] Elected as new leader! Score: %.2f",
-		newEpoch, es.currentLeader.Score)
-	es.broadcastLeaderInfo()
-}
-
-// 广播Leader信息
-func (es *ElectionService) broadcastLeaderInfo() {
-	if es.currentLeader == nil {
-		return
-	}
-
-	leaderData, err := json.Marshal(es.currentLeader)
-
+func (es *ElectionService) sendMsg(pid peer.ID, protocol string, msg string) bool {
+	ctx, cancel := context.WithTimeout(es.ctx, 3*time.Second)
+	defer cancel()
+	s, err := es.h.NewStream(ctx, pid, lp2pProto.ID(protocol))
 	if err != nil {
-		log.Printf("[Epoch:%s] Marshal error: %v", es.currentEpoch, err)
-		return
-	}
-
-	log.Printf("📢 [Epoch:%s] Broadcasting leader info", es.currentEpoch)
-
-	for _, pid := range es.host.Peerstore().Peers() {
-		if pid == es.host.ID() {
-			continue
-		}
-		tarGetname := es.registry.Peers[pid].Hostname
-		log.Println("will send to", pid, tarGetname, "leader", es.currentLeader.Hostname)
-		go func(target peer.ID) {
-			ctx, cancel := context.WithTimeout(es.ctx, 3*time.Second)
-			defer cancel()
-
-			s, err := es.host.NewStream(ctx, target, electionProtocol)
-			if err != nil {
-				return
-			}
-			defer s.Close()
-
-			if _, err := s.Write(leaderData); err != nil {
-				log.Printf("[Epoch:%s] Send error: %v", es.currentEpoch, err)
-			}
-		}(pid)
-	}
-}
-
-// 处理网络流
-func (es *ElectionService) handleStream(s network.Stream) {
-	defer s.Close()
-
-	var li LeaderInfo
-	if err := json.NewDecoder(s).Decode(&li); err != nil {
-		log.Printf("[Epoch:%s] Decode error: %v", es.currentEpoch, err)
-		return
-	}
-
-	es.mu.Lock()
-	defer es.mu.Unlock()
-	log.Println("get a leader", li)
-
-	if es.currentEpoch == "init" {
-		es.currentLeader = &li
-		es.currentEpoch = li.Epoch
-		log.Printf("接受初始Leader: %s (Epoch: %s)", li.Hostname, li.Epoch)
-		return
-	}
-	fmt.Println("leaderData", li.Epoch)
-	currentTimestamp, _ := parseEpochTimestamp(es.currentLeader.Epoch)
-	newTimestamp, _ := parseEpochTimestamp(li.Epoch)
-	fmt.Println(newTimestamp, currentTimestamp)
-	// 优先比较epoch新旧
-	if es.currentLeader == nil ||
-		newTimestamp > currentTimestamp {
-
-		es.currentLeader = &li
-		es.currentEpoch = li.Epoch
-		log.Printf("🔄 [Epoch:%s] Updated leader: %s (Score: %.2f)",
-			li.Epoch, li.Hostname, li.Score)
-	}
-}
-
-// 监控Leader状态
-func (es *ElectionService) monitorLeader() {
-	ticker := time.NewTicker(heartbeatInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-es.ctx.Done():
-			return
-		case <-ticker.C:
-			es.checkLeaderStatus()
-		}
-	}
-}
-
-func (es *ElectionService) checkLeaderStatus() {
-	es.mu.RLock()
-	current := es.currentLeader
-	es.mu.RUnlock()
-
-	if current == nil {
-		log.Printf("[Epoch:%s] No active leader", es.currentEpoch)
-		return
-	}
-
-	if current.PeerID == es.host.ID() {
-		log.Printf("[Epoch:%s] Sending heartbeat", es.currentEpoch)
-		es.broadcastLeaderInfo()
-		return
-	}
-
-	if time.Since(current.LastSeen) > electionTimeout {
-		log.Printf("[Epoch:%s] Leader timeout, last seen: %v",
-			es.currentEpoch, current.LastSeen)
-		es.startElection()
-	}
-}
-func compareEpoch(epochNet string, epochNow string) bool {
-	currentTimestamp, _ := parseEpochTimestamp(epochNet)
-	newTimestamp, _ := parseEpochTimestamp(epochNow)
-
-	return newTimestamp > currentTimestamp
-}
-
-// 发送投票请求
-func (es *ElectionService) sendVoteRequest(candidate *LeaderInfo) {
-	// 仅与目标候选者通信
-	s, err := es.host.NewStream(context.Background(), candidate.PeerID, electionothersProtocol)
-	if err != nil {
-		log.Printf("连接候选者 %s 失败: %v", candidate.Hostname, err)
-		return
+		return false
 	}
 	defer s.Close()
-
-	// 构造请求
-	req := ElectionRequest{
-		Candidate:    *candidate,
-		RequestEpoch: es.generateEpoch(),
+	if err := json.NewEncoder(s).Encode(msg); err != nil {
+		return false
 	}
-
-	// 发送请求（带超时）
-	if err := s.SetWriteDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		return
-	}
-	if err := json.NewEncoder(s).Encode(req); err != nil {
-		log.Printf("发送选举请求失败: %v", err)
-		return
-	}
-
-	// 接收响应（带超时）
-	if err := s.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		return
-	}
-	var resp ElectionResponse
-	if err := json.NewDecoder(s).Decode(&resp); err != nil {
-		log.Printf("读取响应失败: %v", err)
-		return
-	}
-
-	es.mu.Lock()
-	defer es.mu.Unlock()
-
-	// 处理响应
-	if resp.Accepted {
-		log.Printf("✅ 候选者 %s 接受成为Leader", candidate.Hostname)
-
-		es.currentLeader = candidate
-
-	} else {
-		log.Printf("❌ 候选者 %s 拒绝选举请求", candidate.Hostname)
-		// 同步更高Epoch
-		if compareEpoch(resp.CurrentEpoch, es.currentEpoch) == true {
-			es.currentEpoch = resp.CurrentEpoch
-		}
-	}
+	return true
 }
-func (es *ElectionService) handleeliction(s network.Stream) {
 
-	var req ElectionRequest
-	if err := json.NewDecoder(s).Decode(&req); err != nil {
-		log.Printf("解码选举请求失败: %v", err)
-		return
+func short(id peer.ID) string {
+	s := id.String()
+	if len(s) > 8 {
+		return s[:8]
 	}
-	fmt.Println("req", req)
-
-	es.mu.Lock()
-	defer es.mu.Unlock()
-
-	resp := ElectionResponse{
-		CurrentEpoch: es.currentEpoch,
-	}
-	fmt.Println("test", compareEpoch(es.currentEpoch, req.RequestEpoch))
-	// 决策条件
-	if compareEpoch(es.currentEpoch, req.RequestEpoch) == true {
-		// 接受成为Leader
-
-		resp.Accepted = true
-		es.mu.Unlock()
-		es.declareSelfAsLeader() // 候选者立即自声明
-	}
-
-	if err := json.NewEncoder(s).Encode(resp); err != nil {
-		log.Printf("发送响应失败: %v", err)
-	}
+	return s
 }
