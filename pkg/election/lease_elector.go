@@ -125,7 +125,7 @@ func (es *ElectionService) handleElection(s network.Stream) {
 		return
 	}
 
-	log.Printf("📨 [%s] ← ELECTION from %s", selfHost, remoteHost)
+	log.Printf("📨 [%s] ← ELECTION from %s", selfHost, remoteHost, remotePID)
 
 	// 回复 OK (空字符串即可)
 	_ = es.sendMsg(remotePID, protoElection, "OK")
