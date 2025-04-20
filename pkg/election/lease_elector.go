@@ -387,7 +387,7 @@ func (es *ElectionService) sendVoteRequest(candidate *LeaderInfo) {
 	}
 }
 func (es *ElectionService) handleeliction(s network.Stream) {
-	
+
 	var req ElectionRequest
 	if err := json.NewDecoder(s).Decode(&req); err != nil {
 		log.Printf("解码选举请求失败: %v", err)
@@ -401,6 +401,7 @@ func (es *ElectionService) handleeliction(s network.Stream) {
 	resp := ElectionResponse{
 		CurrentEpoch: es.currentEpoch,
 	}
+	fmt.Println("test", compareEpoch(es.currentEpoch, req.RequestEpoch))
 	// 决策条件
 	if compareEpoch(es.currentEpoch, req.RequestEpoch) == true {
 		// 接受成为Leader
