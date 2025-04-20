@@ -387,13 +387,13 @@ func (es *ElectionService) sendVoteRequest(candidate *LeaderInfo) {
 	}
 }
 func (es *ElectionService) handleeliction(s network.Stream) {
-	defer s.Close()
-
+	
 	var req ElectionRequest
 	if err := json.NewDecoder(s).Decode(&req); err != nil {
 		log.Printf("解码选举请求失败: %v", err)
 		return
 	}
+	fmt.Println("req", req)
 
 	es.mu.Lock()
 	defer es.mu.Unlock()
@@ -401,7 +401,6 @@ func (es *ElectionService) handleeliction(s network.Stream) {
 	resp := ElectionResponse{
 		CurrentEpoch: es.currentEpoch,
 	}
-	fmt.Println()
 	// 决策条件
 	if compareEpoch(es.currentEpoch, req.RequestEpoch) == true {
 		// 接受成为Leader
@@ -409,7 +408,7 @@ func (es *ElectionService) handleeliction(s network.Stream) {
 		resp.Accepted = true
 		es.declareSelfAsLeader() // 候选者立即自声明
 	}
-	fmt.Println("answer ", resp)
+
 	if err := json.NewEncoder(s).Encode(resp); err != nil {
 		log.Printf("发送响应失败: %v", err)
 	}
