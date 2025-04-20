@@ -244,6 +244,7 @@ func (es *ElectionService) broadcast(protocol string, payload string) {
 			continue
 		}
 		es.sendMsg(pid, protocol, payload)
+		log.Println("broadcast to ", pid, "i am leader")
 	}
 }
 
