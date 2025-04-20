@@ -375,7 +375,7 @@ func (es *ElectionService) sendVoteRequest(candidate *LeaderInfo) {
 	// 处理响应
 	if resp.Accepted {
 		log.Printf("✅ 候选者 %s 接受成为Leader", candidate.Hostname)
-		
+
 		es.currentLeader = candidate
 
 	} else {
@@ -403,7 +403,7 @@ func (es *ElectionService) handleeliction(s network.Stream) {
 	}
 
 	// 决策条件
-	if compareEpoch(req.RequestEpoch, es.currentEpoch) == true & {
+	if compareEpoch(req.RequestEpoch, es.currentEpoch) == true {
 		// 接受成为Leader
 		resp.Accepted = true
 		es.currentEpoch = req.RequestEpoch
