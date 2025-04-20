@@ -90,7 +90,7 @@ func (es *ElectionService) startElection() {
 		es.becomeLeader()
 		return
 	}
-
+	log.Println("higher", higher)
 	// 向所有更高优先级节点并发发送 ELECTION
 	var wg sync.WaitGroup
 	okCh := make(chan struct{}, len(higher))
