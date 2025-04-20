@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -20,26 +21,25 @@ const (
 	protoElection    = "/bully/election/1.0.0"
 	protoCoordinator = "/bully/coord/1.0.0"
 
-	heartbeatInterval = 5 * time.Second  // leader → followers
-	leaderTimeout     = 15 * time.Second // follower 检测 leader 心跳超时
+	heartbeatInterval = 5 * time.Second
+	leaderTimeout     = 15 * time.Second
 )
 
-// ElectionService implements the Bully algorithm on top of libp2p.
+// ElectionService implements Bully algorithm but **stores leader as hostname**.
 type ElectionService struct {
 	h        host.Host
 	registry *mdns.PeerRegistry
 
 	mu         sync.RWMutex
-	leader     peer.ID
+	leaderHost string // 只存主机名，不存 peer.ID
 	leaderSeen time.Time
 	inElection bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	stopHB context.CancelFunc // 用于停止 leader 心跳 goroutine
+	stopHB context.CancelFunc
 }
 
-// NewElectionService constructs an ElectionService bound to a libp2p host.
 func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ElectionService{
@@ -50,18 +50,15 @@ func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
 	}
 }
 
-// Start registers stream handlers and boots auxiliary goroutines.
+// -------------------------------------------------- public --------------------------------------------------
 func (es *ElectionService) Start() {
 	es.h.SetStreamHandler(protoElection, es.handleElection)
 	es.h.SetStreamHandler(protoCoordinator, es.handleCoordinator)
 
-	// 延时触发选举，给网络发现一些时间
 	time.AfterFunc(2*time.Second, es.startElection)
-
 	go es.monitorLeader()
 }
 
-// Stop shuts everything down gracefully.
 func (es *ElectionService) Stop() {
 	es.cancel()
 	es.h.RemoveStreamHandler(protoElection)
@@ -71,9 +68,7 @@ func (es *ElectionService) Stop() {
 	}
 }
 
-// -------------------- Bully algorithm core --------------------
-
-// startElection initiates a Bully round if not already running.
+// -------------------------------------------------- Bully core --------------------------------------------------
 func (es *ElectionService) startElection() {
 	es.mu.Lock()
 	if es.inElection {
@@ -83,22 +78,26 @@ func (es *ElectionService) startElection() {
 	es.inElection = true
 	es.mu.Unlock()
 
-	log.Printf("🔔 [%s] start ELECTION", es.h.ID())
+	selfHost, _ := os.Hostname()
+	log.Printf("🔔 [%s] start ELECTION", selfHost)
 
-	higher := es.higherPriorityPeers()
+	higher := es.higherPriorityHosts()
 	if len(higher) == 0 {
 		es.becomeLeader()
 		return
 	}
-	log.Println("higher", higher)
-	// 向所有更高优先级节点并发发送 ELECTION
+
 	var wg sync.WaitGroup
 	okCh := make(chan struct{}, len(higher))
-	for _, pid := range higher {
+	for _, hostName := range higher {
+		pid, ok := es.registry.MapNamePeer[hostName]
+		if !ok {
+			continue
+		}
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()
-			if es.sendMsg(p, protoElection, "ELECTION") {
+			if es.sendMsg(p, protoElection, selfHost) { // 发送自己 hostname 作为负载
 				okCh <- struct{}{}
 			}
 		}(pid)
@@ -106,68 +105,67 @@ func (es *ElectionService) startElection() {
 	wg.Wait()
 	close(okCh)
 
-	// 若无人回应 OK，自身称王
 	if len(okCh) == 0 {
 		es.becomeLeader()
 	} else {
-		log.Printf("⏳ [%s] waiting COORDINATOR", es.h.ID())
+		log.Printf("⏳ [%s] waiting COORDINATOR", selfHost)
 	}
 }
 
 func (es *ElectionService) handleElection(s network.Stream) {
 	defer s.Close()
+	remotePID := s.Conn().RemotePeer()
+	remoteHost := es.registry.Peers[remotePID].Hostname
+	selfHost, _ := os.Hostname()
 
-	remote := s.Conn().RemotePeer()
-	self := es.h.ID()
-	if remote == self {
-		// 忽略自己发给自己的选举
+	if remoteHost == "" || remoteHost == selfHost {
 		return
 	}
-	log.Printf("📨 [%s] ← ELECTION from %s", es.h.ID(), remote)
 
-	// 回复 OK
-	_ = es.sendMsg(remote, protoElection, "OK")
+	log.Printf("📨 [%s] ← ELECTION from %s", selfHost, remoteHost)
 
-	if self > remote {
+	// 回复 OK (空字符串即可)
+	_ = es.sendMsg(remotePID, protoElection, "OK")
+
+	// 若我优先级更高则发起选举
+	if selfHost > remoteHost {
 		es.startElection()
 	}
 }
 
-// handleCoordinator processes a COORDINATOR message.
 func (es *ElectionService) handleCoordinator(s network.Stream) {
 	defer s.Close()
 
-	var msg string
-	if err := json.NewDecoder(s).Decode(&msg); err != nil || msg != "COORDINATOR" {
+	var leaderHost string
+	if err := json.NewDecoder(s).Decode(&leaderHost); err != nil {
 		return
 	}
-	remote := s.Conn().RemotePeer()
 
 	es.mu.Lock()
-	es.leader = remote
+	es.leaderHost = leaderHost
 	es.leaderSeen = time.Now()
 	es.inElection = false
 	es.mu.Unlock()
 
-	log.Printf("👑 [%s] accepted COORDINATOR %s", es.h.ID(), remote)
+	selfHost, _ := os.Hostname()
+	log.Printf("👑 [%s] accepted COORDINATOR %s", selfHost, leaderHost)
 }
 
-// becomeLeader transitions this node into leader state.
 func (es *ElectionService) becomeLeader() {
+	selfHost, _ := os.Hostname()
+
 	es.mu.Lock()
-	es.leader = es.h.ID()
+	es.leaderHost = selfHost
 	es.leaderSeen = time.Now()
 	es.inElection = false
 	es.mu.Unlock()
 
-	log.Printf("🥳 [%s] I AM THE NEW LEADER", es.h.ID())
-
-	es.broadcast(protoCoordinator, "COORDINATOR")
+	log.Printf("🥳 [%s] I AM THE NEW LEADER", selfHost)
+	es.broadcast(protoCoordinator, selfHost)
 	es.startHeartbeat()
 }
 
-// -------------------- Heartbeat handling --------------------
-
+// -------------------------------------------------- heartbeat --------------------------------------------------
 func (es *ElectionService) startHeartbeat() {
 	if es.stopHB != nil {
 		es.stopHB()
@@ -184,9 +182,10 @@ func (es *ElectionService) startHeartbeat() {
 				return
 			case <-t.C:
 				es.mu.Lock()
-				es.leaderSeen = time.Now() // 更新本地心跳时间
+				es.leaderSeen = time.Now()
 				es.mu.Unlock()
-				es.broadcast(protoCoordinator, "COORDINATOR")
+				selfHost, _ := os.Hostname()
+				es.broadcast(protoCoordinator, selfHost)
 			}
 		}
 	}()
@@ -195,6 +194,7 @@ func (es *ElectionService) startHeartbeat() {
 func (es *ElectionService) monitorLeader() {
 	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
+	selfHost, _ := os.Hostname()
 
 	for {
 		select {
@@ -202,63 +202,56 @@ func (es *ElectionService) monitorLeader() {
 			return
 		case <-t.C:
 			es.mu.RLock()
-			ld, seen := es.leader, es.leaderSeen
+			leader, seen := es.leaderHost, es.leaderSeen
 			es.mu.RUnlock()
 
-			if ld == es.h.ID() {
-				// 我就是 leader
+			if leader == selfHost {
 				continue
 			}
-			if ld == "" || time.Since(seen) > leaderTimeout {
-				log.Printf("⚠️  [%s] leader lost, restarting election", es.h.ID())
+			if leader == "" || time.Since(seen) > leaderTimeout {
+				log.Printf("⚠️  [%s] leader lost, restart election", selfHost)
 				es.startElection()
 			}
 		}
 	}
 }
 
-// -------------------- Utility --------------------
+// -------------------------------------------------- utils --------------------------------------------------
+func (es *ElectionService) higherPriorityHosts() []string {
+	var hosts []string
+	for name := range es.registry.MapNamePeer {
+		hosts = append(hosts, name)
+	}
+	sort.Strings(hosts)
+	selfHost, _ := os.Hostname()
 
-// higherPriorityPeers returns peers whose ID is lexicographically greater than ours.
-func (es *ElectionService) higherPriorityPeers() []peer.ID {
-	all := es.h.Peerstore().Peers()
-	sort.Sort(all) // peer.IDSlice implements sort.Interface
-	log.Println("all:", all)
-	self := es.h.ID()
-
-	var higher []peer.ID
-	for _, p := range all {
-		if p == self {
-			continue
-		}
-		if p > self {
-			higher = append(higher, p)
+	var higher []string
+	for _, h := range hosts {
+		if h > selfHost {
+			higher = append(higher, h)
 		}
 	}
 	return higher
 }
 
 func (es *ElectionService) broadcast(protocol string, payload string) {
-	for _, pid := range es.h.Peerstore().Peers() {
-		if pid == es.h.ID() {
+	for name, pid := range es.registry.MapNamePeer {
+		if name == payload { // 不发给自己
 			continue
 		}
 		es.sendMsg(pid, protocol, payload)
-		log.Println("broadcast to ", pid, "i am leader")
 	}
 }
 
-func (es *ElectionService) sendMsg(pid peer.ID, protocol string, msg string) bool {
+func (es *ElectionService) sendMsg(pid peer.ID, protocol string, payload string) bool {
 	ctx, cancel := context.WithTimeout(es.ctx, 3*time.Second)
 	defer cancel()
-
 	s, err := es.h.NewStream(ctx, pid, lp2pProto.ID(protocol))
 	if err != nil {
 		return false
 	}
 	defer s.Close()
-
-	if err := json.NewEncoder(s).Encode(msg); err != nil {
+	if err := json.NewEncoder(s).Encode(payload); err != nil {
 		return false
 	}
 	return true
