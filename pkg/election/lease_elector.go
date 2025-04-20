@@ -106,7 +106,7 @@ func (es *ElectionService) startElection() {
 	}
 	wg.Wait()
 	close(okCh)
-
+	log.Println("receive ", len(okCh), "ok")
 	if len(okCh) == 0 {
 		es.becomeLeader()
 	} else {
@@ -135,6 +135,7 @@ func (es *ElectionService) handleElection(s network.Stream) {
 	}
 }
 
+// 处理COORDINATOR消息
 func (es *ElectionService) handleCoordinator(s network.Stream) {
 	defer s.Close()
 
@@ -144,13 +145,20 @@ func (es *ElectionService) handleCoordinator(s network.Stream) {
 	}
 
 	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	// 如果已经是Leader，就不再处理 COORDINATOR
+	if es.leaderHost != "" && es.leaderHost != leaderHost {
+		log.Printf("⚠️ [%s] Already have a leader: %s, ignoring new COORDINATOR", es.h.ID(), es.leaderHost)
+		return
+	}
+
+	// 如果没有Leader，或者接收到更高优先级的COORDINATOR
 	es.leaderHost = leaderHost
 	es.leaderSeen = time.Now()
 	es.inElection = false
-	es.mu.Unlock()
 
-	selfHost, _ := os.Hostname()
-	log.Printf("👑 [%s] accepted COORDINATOR %s", selfHost, leaderHost)
+	log.Printf("👑 [%s] accepted COORDINATOR %s", es.h.ID(), leaderHost)
 }
 
 func (es *ElectionService) becomeLeader() {
