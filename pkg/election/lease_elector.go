@@ -407,7 +407,7 @@ func (es *ElectionService) handleeliction(s network.Stream) {
 		// 接受成为Leader
 
 		resp.Accepted = true
-		defer es.mu.Unlock()
+		es.mu.Unlock()
 		es.declareSelfAsLeader() // 候选者立即自声明
 	}
 
