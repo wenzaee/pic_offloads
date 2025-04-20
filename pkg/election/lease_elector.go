@@ -98,6 +98,7 @@ func (es *ElectionService) startElection() {
 		wg.Add(1)
 		go func(p peer.ID) {
 			defer wg.Done()
+			log.Println("send eliction to ", p)
 			if es.sendMsg(p, protoElection, selfHost) { // 发送自己 hostname 作为负载
 				okCh <- struct{}{}
 				log.Println("receive ok")
