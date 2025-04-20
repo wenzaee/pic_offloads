@@ -137,9 +137,9 @@ func (es *ElectionService) startElection() {
 		return
 	}
 	fmt.Println("all peers ", allPeers)
-	var maxScore float64
-	var candidate *LeaderInfo
-
+	var maxScore float64 = allPeers[0].Score
+	var candidate *LeaderInfo = allPeers[0]
+	
 	// 本地决策选出候选
 	for _, p := range allPeers {
 		if score := p.Score; score > maxScore {
