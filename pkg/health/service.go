@@ -31,7 +31,7 @@ func StartHealthMonitor() {
 	for {
 		select {
 		case <-ticker.C:
-			if err := refreshHealthData(); err != nil {
+			if err := RefreshHealthData(); err != nil {
 				log.Printf("Health update failed: %v", err)
 			}
 		}
@@ -39,7 +39,7 @@ func StartHealthMonitor() {
 }
 
 // refreshHealthData 原子化更新健康数据
-func refreshHealthData() error {
+func RefreshHealthData() error {
 	resp, err := httpClient.Get(healthEndpoint)
 	if err != nil {
 		return fmt.Errorf("HTTP请求失败: %w", err)

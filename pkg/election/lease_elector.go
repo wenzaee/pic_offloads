@@ -1,4 +1,3 @@
-// 路径：pkg/election/election.go
 package election
 
 import (
@@ -161,10 +160,11 @@ func (es *ElectionService) startElection() {
 func (es *ElectionService) getCandidatePeers() []*LeaderInfo {
 	es.registry.Lock.RLock()
 	defer es.registry.Lock.RUnlock()
-
+	health.RefreshHealthData()
 	var peers []*LeaderInfo
 	for hostname, peerID := range es.registry.MapNamePeer {
 		status, exists := health.MapNameHealth[hostname]
+
 		if !exists {
 			continue
 		}
