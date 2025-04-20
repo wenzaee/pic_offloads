@@ -82,6 +82,7 @@ func (es *ElectionService) startElection() {
 	log.Printf("🔔 [%s] start ELECTION", selfHost)
 
 	higher := es.higherPriorityHosts()
+	log.Println("higher", higher)
 	if len(higher) == 0 {
 		es.becomeLeader()
 		return
@@ -99,6 +100,7 @@ func (es *ElectionService) startElection() {
 			defer wg.Done()
 			if es.sendMsg(p, protoElection, selfHost) { // 发送自己 hostname 作为负载
 				okCh <- struct{}{}
+				log.Println("receive ok")
 			}
 		}(pid)
 	}
