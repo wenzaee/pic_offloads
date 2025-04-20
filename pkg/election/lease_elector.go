@@ -114,12 +114,12 @@ func (es *ElectionService) startElection() {
 	}
 }
 
-// handleElection processes an incoming ELECTION request.
 func (es *ElectionService) handleElection(s network.Stream) {
 	defer s.Close()
 
 	remote := s.Conn().RemotePeer()
-	if remote == es.h.ID() {
+	self := es.h.ID()
+	if remote == self {
 		// 忽略自己发给自己的选举
 		return
 	}
@@ -127,7 +127,10 @@ func (es *ElectionService) handleElection(s network.Stream) {
 
 	// 回复 OK
 	_ = es.sendMsg(remote, protoElection, "OK")
-	// 等待高优先级节点宣布协调者，不再发起新的选举
+
+	if self > remote {
+		es.startElection()
+	}
 }
 
 // handleCoordinator processes a COORDINATOR message.
