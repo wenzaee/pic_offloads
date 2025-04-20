@@ -162,8 +162,10 @@ func (es *ElectionService) getCandidatePeers() []*LeaderInfo {
 	es.registry.Lock.RLock()
 	defer es.registry.Lock.RUnlock()
 	health.RefreshHealthData()
+	fmt.Println("health", health.MapNameHealth)
 	var peers []*LeaderInfo
 	for hostname, peerID := range es.registry.MapNamePeer {
+		fmt.Println("add a peer", hostname, peerID)
 		status, exists := health.MapNameHealth[hostname]
 
 		if !exists {
