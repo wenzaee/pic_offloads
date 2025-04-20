@@ -147,7 +147,8 @@ func (es *ElectionService) startElection() {
 			candidate = p
 		}
 	}
-
+	fmt.Printf("candidate.PeerID", candidate.PeerID)
+	fmt.Println("es.host.ID()", es.host.ID())
 	// 声明自己为Leader如果得分最高
 	if candidate.PeerID == es.host.ID() {
 		es.declareSelfAsLeader()
