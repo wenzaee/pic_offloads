@@ -401,12 +401,12 @@ func (es *ElectionService) handleeliction(s network.Stream) {
 	resp := ElectionResponse{
 		CurrentEpoch: es.currentEpoch,
 	}
-
+	fmt.Println()
 	// 决策条件
-	if compareEpoch(req.RequestEpoch, es.currentEpoch) == true {
+	if compareEpoch(es.currentEpoch, req.RequestEpoch) == true {
 		// 接受成为Leader
+
 		resp.Accepted = true
-		es.currentEpoch = req.RequestEpoch
 		es.declareSelfAsLeader() // 候选者立即自声明
 	}
 
