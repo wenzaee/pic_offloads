@@ -144,7 +144,7 @@ func (es *ElectionService) handleElection(s network.Stream) {
 	sendbool := es.sendMsg(remotePID, protoElection, "OK")
 	log.Println("sendbool", sendbool)
 	// 若我优先级更高则发起选举
-	if selfHost > remoteHost && es.leaderHost != selfHost {
+	if selfHost > remoteHost && es.leaderHost != selfHost && !es.inElection {
 		log.Println("i want to startelect")
 		es.startElection()
 	}
