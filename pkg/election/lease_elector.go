@@ -20,6 +20,7 @@ import (
 const (
 	protoElection    = "/bully/election/1.0.0"
 	protoCoordinator = "/bully/coord/1.0.0"
+	protook          = "/bully/ok/1.0.0"
 
 	heartbeatInterval = 5 * time.Second
 	leaderTimeout     = 15 * time.Second
@@ -141,7 +142,7 @@ func (es *ElectionService) handleElection(s network.Stream) {
 	log.Printf("📨 [%s] ← ELECTION from %s", selfHost, remoteHost, remotePID)
 
 	// 回复 OK (空字符串即可)
-	sendbool := es.sendMsg(remotePID, protoElection, "OK")
+	sendbool := es.sendMsg(remotePID, protook, "OK")
 	log.Println("sendbool", sendbool)
 	// 若我优先级更高则发起选举
 	if selfHost > remoteHost && es.leaderHost != selfHost && !es.inElection {
