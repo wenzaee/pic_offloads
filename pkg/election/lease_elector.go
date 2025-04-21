@@ -274,6 +274,7 @@ func (es *ElectionService) broadcast(protocol string, payload string) {
 		if name == payload { // 不发给自己
 			continue
 		}
+		log.Println("I am master now")
 		es.sendMsg(pid, protocol, payload)
 	}
 }
