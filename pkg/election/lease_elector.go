@@ -119,8 +119,8 @@ func (es *ElectionService) startElection() {
 	//		log.Println("receive ok")
 	//	}
 	//}
-	//wg.Wait()
-	//close(okCh)
+	wg.Wait()
+	close(okCh)
 	log.Println("receive ", len(okCh), "ok")
 	if len(okCh) == 0 {
 		es.becomeLeader()
