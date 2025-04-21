@@ -168,7 +168,7 @@ func (es *ElectionService) handleCoordinator(s network.Stream) {
 
 	// 如果已经是Leader，就不再处理 COORDINATOR
 	if es.leaderHost != "" && es.leaderHost > leaderHost {
-		log.Printf("⚠️ [%s] Already have a leader: %s, ignoring new COORDINATOR", es.h.ID(), es.leaderHost)
+		log.Printf("⚠️ [%s] Already have a leader: %s, ignoring new COORDINATOR", es.h.ID(), es.leaderHost, "get ", leaderHost)
 		return
 	}
 
