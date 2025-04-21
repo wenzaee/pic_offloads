@@ -154,7 +154,10 @@ func (es *ElectionService) handleElection(s network.Stream) {
 // 处理COORDINATOR消息
 func (es *ElectionService) handleCoordinator(s network.Stream) {
 	defer s.Close()
-
+	remotePID := s.Conn().RemotePeer()
+	if remotePID == es.h.ID() {
+		return
+	}
 	var leaderHost string
 	if err := json.NewDecoder(s).Decode(&leaderHost); err != nil {
 		return
