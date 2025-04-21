@@ -145,7 +145,7 @@ func (es *ElectionService) handleElection(s network.Stream) {
 
 	// 若我优先级更高则发起选举
 	if selfHost > remoteHost && es.leaderHost != selfHost {
-
+		log.Println("i want to startelect")
 		es.startElection()
 	}
 }
