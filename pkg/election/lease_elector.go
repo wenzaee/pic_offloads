@@ -239,6 +239,7 @@ func (es *ElectionService) monitorLeader() {
 				continue
 			}
 			if leader == "" || time.Since(seen) > leaderTimeout {
+				es.leaderHost = ""
 				log.Printf("⚠️  [%s] leader lost, restart election", selfHost)
 				es.startElection()
 			}
