@@ -284,12 +284,10 @@ func (es *ElectionService) sendMsg(pid peer.ID, protocol string, payload string)
 	defer cancel()
 	s, err := es.h.NewStream(ctx, pid, lp2pProto.ID(protocol))
 	if err != nil {
-		log.Println("err NewStream", err)
 		return false
 	}
 	defer s.Close()
 	if err := json.NewEncoder(s).Encode(payload); err != nil {
-		log.Println("err", err)
 		return false
 	}
 	return true
