@@ -202,7 +202,7 @@ func (es *ElectionService) startHeartbeat() {
 	}
 	ctx, cancel := context.WithCancel(es.ctx)
 	es.stopHB = cancel
-
+	hostname, _ := os.Hostname()
 	go func() {
 		t := time.NewTicker(heartbeatInterval)
 		defer t.Stop()
@@ -215,7 +215,10 @@ func (es *ElectionService) startHeartbeat() {
 				es.leaderSeen = time.Now()
 				es.mu.Unlock()
 				selfHost, _ := os.Hostname()
-				es.broadcast(protoCoordinator, selfHost)
+				if es.leaderHost == hostname {
+					es.broadcast(protoCoordinator, selfHost)
+				}
+
 			}
 		}
 	}()
