@@ -280,6 +280,7 @@ func (es *ElectionService) sendMsg(pid peer.ID, protocol string, payload string)
 	}
 	defer s.Close()
 	if err := json.NewEncoder(s).Encode(payload); err != nil {
+		log.Println("err", err)
 		return false
 	}
 	return true
