@@ -144,7 +144,8 @@ func (es *ElectionService) handleElection(s network.Stream) {
 	_ = es.sendMsg(remotePID, protoElection, "OK")
 
 	// 若我优先级更高则发起选举
-	if selfHost > remoteHost {
+	if selfHost > remoteHost && es.leaderHost != selfHost {
+
 		es.startElection()
 	}
 }
@@ -173,6 +174,7 @@ func (es *ElectionService) handleCoordinator(s network.Stream) {
 	es.inElection = false
 
 	log.Printf("👑 [%s] accepted COORDINATOR %s", es.h.ID(), leaderHost)
+	time.Sleep(5 * time.Second)
 }
 
 func (es *ElectionService) becomeLeader() {
