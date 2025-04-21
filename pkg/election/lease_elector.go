@@ -163,7 +163,7 @@ func (es *ElectionService) handleCoordinator(s network.Stream) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	if es.leaderHost == leaderHost {
-		log.Printf("️ no change nothing to do")
+		log.Printf("️ no change nothing to do leader", es.leaderHost)
 		return
 	}
 
@@ -173,7 +173,6 @@ func (es *ElectionService) handleCoordinator(s network.Stream) {
 	es.inElection = false
 
 	log.Printf("👑 [%s] accepted COORDINATOR %s", es.h.ID(), leaderHost)
-	time.Sleep(5 * time.Second)
 }
 
 func (es *ElectionService) becomeLeader() {
