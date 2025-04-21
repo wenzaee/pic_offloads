@@ -162,8 +162,10 @@ func (es *ElectionService) handleCoordinator(s network.Stream) {
 
 	es.mu.Lock()
 	defer es.mu.Unlock()
-	if es.leaderHost == leaderHost {
-		log.Printf("️ no change nothing to do leader", es.leaderHost)
+
+	// 如果已经是Leader，就不再处理 COORDINATOR
+	if es.leaderHost != "" && es.leaderHost > leaderHost {
+		log.Printf("⚠️ [%s] Already have a leader: %s, ignoring new COORDINATOR", es.h.ID(), es.leaderHost)
 		return
 	}
 
@@ -173,6 +175,7 @@ func (es *ElectionService) handleCoordinator(s network.Stream) {
 	es.inElection = false
 
 	log.Printf("👑 [%s] accepted COORDINATOR %s", es.h.ID(), leaderHost)
+	time.Sleep(5 * time.Second)
 }
 
 func (es *ElectionService) becomeLeader() {
