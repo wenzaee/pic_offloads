@@ -90,20 +90,33 @@ func (es *ElectionService) startElection() {
 
 	var wg sync.WaitGroup
 	okCh := make(chan struct{}, len(higher))
+	//for _, hostName := range higher {
+	//	pid, ok := es.registry.MapNamePeer[hostName]
+	//	if !ok {
+	//		continue
+	//	}
+	//	wg.Add(1)
+	//	go func(p peer.ID) {
+	//		defer wg.Done()
+	//		log.Println("send eliction to ", p)
+	//		if es.sendMsg(p, protoElection, selfHost) { // 发送自己 hostname 作为负载
+	//			okCh <- struct{}{}
+	//			log.Println("receive ok")
+	//		}
+	//	}(pid)
+	//}
 	for _, hostName := range higher {
 		pid, ok := es.registry.MapNamePeer[hostName]
 		if !ok {
 			continue
 		}
 		wg.Add(1)
-		go func(p peer.ID) {
-			defer wg.Done()
-			log.Println("send eliction to ", p)
-			if es.sendMsg(p, protoElection, selfHost) { // 发送自己 hostname 作为负载
-				okCh <- struct{}{}
-				log.Println("receive ok")
-			}
-		}(pid)
+		defer wg.Done()
+		log.Println("send eliction to ", pid)
+		if es.sendMsg(pid, protoElection, selfHost) { // 发送自己 hostname 作为负载
+			okCh <- struct{}{}
+			log.Println("receive ok")
+		}
 	}
 	wg.Wait()
 	close(okCh)
