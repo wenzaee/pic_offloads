@@ -51,7 +51,6 @@ func NewElectionService(h host.Host, r *mdns.PeerRegistry) *ElectionService {
 	}
 }
 
-// -------------------------------------------------- public --------------------------------------------------
 func (es *ElectionService) Start() {
 	es.h.SetStreamHandler(protoElection, es.handleElection)
 	es.h.SetStreamHandler(protoCoordinator, es.handleCoordinator)
