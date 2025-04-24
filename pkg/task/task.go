@@ -1,6 +1,7 @@
 package task
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/gob"
 	"fmt"
@@ -9,9 +10,12 @@ import (
 	"io"
 	"log"
 	deafault "pic_offload/pkg/apis"
+	"strings"
+	"time"
 )
 
-func (ts *TaskScheduler) TransferTaskToTargetHost(task *Task, TargetName string) error {
+func (ts *TaskScheduler) TransferTaskToTargetHost(taskstr, TargetName string) error {
+	task := ts.Tasks[taskstr]
 	tarData, err := CompressFolderToTar(task.FilePath)
 	if err != nil {
 		return fmt.Errorf("压缩文件夹失败: %v", err)
@@ -84,6 +88,146 @@ func (ts *TaskScheduler) Handlefiles(s network.Stream) {
 	}
 
 }
-func (ts *TaskScheduler) Handleasks(s network.Stream) {
-	
+
+func (ts *TaskScheduler) RequestTaskMigration(taskID, targetHost string) error {
+	// 获取当前任务
+	task, exists := ts.Tasks[taskID]
+	if !exists {
+		return fmt.Errorf("任务ID %s 不存在", taskID)
+	}
+	log.Println("将要转移", task, "至", targetHost)
+	// 生成任务迁移请求
+	migrationRequest := TaskMigrationRequest{
+		TaskID:      taskID,
+		SourceHost:  task.Hostname,
+		TargetHost:  targetHost,
+		TaskDetails: *task,
+	}
+
+	// 获取目标主机的 Peer ID
+	sourcePID := ts.registry.MapNamePeer[migrationRequest.SourceHost]
+	if sourcePID == "" {
+		return fmt.Errorf("目标主机 %s 的 Peer ID 不存在", targetHost)
+	}
+
+	stream, err := ts.h.NewStream(context.Background(), sourcePID, deafault.RequestProtocol)
+	if err != nil {
+		return fmt.Errorf("无法建立流连接到目标主机: %v", err)
+	}
+	defer stream.Close()
+
+	var buf bytes.Buffer
+	encoder := gob.NewEncoder(&buf)
+	err = encoder.Encode(migrationRequest)
+	if err != nil {
+		return fmt.Errorf("迁移请求编码失败: %v", err)
+	}
+
+	// 发送迁移请求数据到目标主机
+	_, err = stream.Write(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("迁移请求发送失败: %v", err)
+	}
+
+	// 输出迁移请求成功消息
+	fmt.Printf("任务 %s 成功请求迁移到目标主机 %s\n", taskID, targetHost)
+	return nil
+}
+func (ts *TaskScheduler) HandleRequestTask(s network.Stream) {
+	var taskRequest TaskMigrationRequest
+	decoder := gob.NewDecoder(s)
+	err := decoder.Decode(&taskRequest)
+	if err != nil {
+		log.Printf("解码失败: %v", err)
+
+	}
+	log.Println("收到一个Request", taskRequest)
+	err = ts.TransferTaskToTargetHost(taskRequest.TaskDetails.ID, taskRequest.TargetHost)
+	if err != nil {
+		return
+	}
+	log.Println("成功转移")
+}
+func (ts *TaskScheduler) SendTask(Taskid, Target string) error {
+
+	TargetPID := ts.registry.MapNamePeer[Target]
+	stream, err := ts.h.NewStream(context.Background(), TargetPID, deafault.SendTaskProtocal)
+	if err != nil {
+		return fmt.Errorf("无法建立流连接到目标主机: %v", err)
+	}
+	defer stream.Close()
+
+	var buf bytes.Buffer
+	encoder := gob.NewEncoder(&buf)
+	err = encoder.Encode(ts.Tasks[Taskid])
+	if err != nil {
+		return fmt.Errorf("发送Task编码失败: %v", err)
+	}
+
+	// 发送迁移请求数据到目标主机
+	_, err = stream.Write(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("发送Task信息失败: %v", err)
+	}
+	return nil
+}
+func (ts *TaskScheduler) HandleSendTask(s network.Stream) {
+	var task Task
+	decoder := gob.NewDecoder(s)
+	err := decoder.Decode(&task)
+	if err != nil {
+		log.Printf("解码失败: %v", err)
+
+	}
+	log.Println("收到一个task", task)
+	ts.Tasks[task.ID] = &task
+	return
+}
+func (ts *TaskScheduler) AskTaskDone(Taskid string) {
+	TargetName := ts.Tasks[Taskid].Hostname
+	TargetPID := ts.registry.MapNamePeer[TargetName]
+
+	stream, err := ts.h.NewStream(context.Background(), TargetPID, deafault.AskProtocol)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stream.Close()
+
+	// 发送键（Key）
+	key := Taskid + "\n"
+	if _, err := stream.Write([]byte(key)); err != nil {
+		log.Fatal(err)
+	}
+	value, _ := bufio.NewReader(stream).ReadString('\n')
+	fmt.Printf("Received value: %s", value)
+	value = strings.TrimSuffix(value, "\n")
+	if value == "true" {
+		ts.Tasks[Taskid].Done = true
+	}
+
+}
+func (ts *TaskScheduler) DoTask(Taskid string) {
+	task := ts.Tasks[Taskid]
+
+	log.Println("写在要开始做task", task.ID, task.Command)
+	task.Done = true
+	time.Sleep(5 * time.Second)
+	log.Println("任务完成")
+
+}
+func (ts *TaskScheduler) HandleAskTask(s network.Stream) {
+	value, _ := bufio.NewReader(s).ReadString('\n')
+	value = strings.TrimSuffix(value, "\n")
+	fmt.Printf("Received value: !%s!", value)
+	var res string
+	if ts.Tasks[value].Done == true {
+		res = "true\n"
+	} else {
+		res = "false\n"
+	}
+
+	if _, err := s.Write([]byte(res)); err != nil {
+		log.Printf("Error writing response: %v", err)
+	}
+
 }

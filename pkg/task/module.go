@@ -15,6 +15,7 @@ type Task struct {
 	Command  string
 	Hostname string
 	FilePath string
+	Done     bool
 }
 type TaskScheduler struct {
 	Tasks    map[string]*Task
@@ -23,11 +24,17 @@ type TaskScheduler struct {
 	h        host.Host
 }
 type MigrationTask struct {
-	ID          string // 可选：任务唯一标识
-	Source      string // 源主机地址（如 "host1:22" 或 "192.168.1.100"）
-	Destination string // 目标主机地址（如 "host2:22" 或 "192.168.1.200"）
-	Resource    string // 要迁移的资源路径（如 "/data/backup.tar"）
-	Command     string // 迁移命令（如 "scp /data/backup.tar user@host2:/remote/path"）
+	ID          string
+	Source      string
+	Destination string
+	Resource    string
+	Command     string
+}
+type TaskMigrationRequest struct {
+	TaskID      string // 任务ID，用于标识任务
+	SourceHost  string // 当前主机名称
+	TargetHost  string // 目标主机名称
+	TaskDetails Task   // 任务详情，包括图像文件路径、命令等
 }
 
 func NewTaskScheduler(h host.Host, r *mdns.PeerRegistry) *TaskScheduler {
@@ -59,6 +66,7 @@ func (ts *TaskScheduler) NewTask(ID string, Command string, Hostname string, Fil
 		Command:  Command,
 		Hostname: Hostname,
 		FilePath: FilePath,
+		Done:     false,
 	}
 	ts.Tasks[ID] = aTask
 	return aTask
@@ -75,7 +83,7 @@ func (ts *TaskScheduler) TimerList() {
 				return
 			case <-t.C:
 				for _, i := range ts.Tasks {
-					fmt.Printf("任务 %s 已调度给节点 %s 工作路径 %s Command为 %s\n", i.ID, i.Hostname, i.FilePath, i.Command)
+					fmt.Printf("任务 %s 已调度给节点 %s 工作路径 %s Command为 %s 完成情况为 %s \n", i.ID, i.Hostname, i.FilePath, i.Command, i.Done)
 				}
 			}
 		}

@@ -7,12 +7,13 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"os"
+	deafault "pic_offload/pkg/apis"
 )
 
 var Edgehost host.Host
 
 func RequestHostname(ctx context.Context, host host.Host, peerID peer.ID) (string, error) {
-	stream, err := host.NewStream(ctx, peerID, "/hostname-protocol")
+	stream, err := host.NewStream(ctx, peerID, deafault.HostnameProtocol)
 	if err != nil {
 		return "", fmt.Errorf("failed to create new stream: %w", err)
 	}

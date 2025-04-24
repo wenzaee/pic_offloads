@@ -54,16 +54,19 @@ func main() {
 		registry,
 	)
 	core.Edgehost.SetStreamHandler(deafault.FilesProtocol, TaskScheduler.Handlefiles)
-	core.Edgehost.SetStreamHandler(deafault.AskProtocol, TaskScheduler.Handleasks)
+	core.Edgehost.SetStreamHandler(deafault.RequestProtocol, TaskScheduler.HandleRequestTask)
+	core.Edgehost.SetStreamHandler(deafault.SendTaskProtocal, TaskScheduler.HandleSendTask)
+	core.Edgehost.SetStreamHandler(deafault.AskProtocol, TaskScheduler.HandleAskTask)
 
 	TaskScheduler.ListTasks()
 	hs, _ := os.Hostname()
+	var task1 *task.Task
 	if hs == "edge02" {
 		time.Sleep(5 * time.Second)
-		task1 := TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
+		task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
 		fmt.Println(task1)
 
-		err = TaskScheduler.TransferTaskToTargetHost(task1, "edge01")
+		err = TaskScheduler.TransferTaskToTargetHost("task1", "edge01")
 
 		if err != nil {
 			log.Println("err ", err)
@@ -72,7 +75,22 @@ func main() {
 	}
 	go TaskScheduler.TimerList()
 
+	time.Sleep(1 * time.Second)
+	if hs == "edge02" {
+
+		TaskScheduler.RequestTaskMigration("task1", "master")
+	}
+	time.Sleep(5 * time.Second)
+	if hs == "master" {
+		TaskScheduler.DoTask("task1")
+		TaskScheduler.SendTask("task1", "edge02")
+	}
 	// 信号处理
+
+	if hs == "edge01" {
+		time.Sleep(15 * time.Second)
+		TaskScheduler.AskTaskDone("task1")
+	}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
