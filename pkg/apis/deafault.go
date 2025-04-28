@@ -4,6 +4,7 @@ import "time"
 
 var (
 	Hostname string
+	DeleteWorkerDir bool // 新增变量，控制是否删除 worker 目录下的任务文件夹
 )
 
 const (

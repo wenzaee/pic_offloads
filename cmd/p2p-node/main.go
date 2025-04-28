@@ -25,6 +25,7 @@ func main() {
 		),
 		libp2p.Ping(true), // 启用 Ping 协议
 	)
+	deafault.DeleteWorkerDir = true
 	core.Edgehost.SetStreamHandler(deafault.HostnameProtocol, core.HandleNameRequest)
 	if err != nil {
 		log.Fatalf("Failed to create host: %v", err)

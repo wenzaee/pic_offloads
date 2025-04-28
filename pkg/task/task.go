@@ -11,6 +11,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	deafault "pic_offload/pkg/apis"
 	"strings"
 )
@@ -270,8 +272,17 @@ func (ts *TaskScheduler) DoTask(Taskid string) {
 		return
 	} else {
 		task.Done = true
+
+		// 新增逻辑：根据 DeleteWorkerDir 变量决定是否删除 worker 目录下的任务文件夹
+		if deafault.DeleteWorkerDir {
+			taskDir := filepath.Join("worker", Taskid)
+			if err := os.RemoveAll(taskDir); err != nil {
+				log.Printf("删除任务文件夹 %s 失败: %v", taskDir, err)
+			} else {
+				log.Printf("已删除任务文件夹: %s", taskDir)
+			}
+		}
 	}
-//	time.Sleep(5 * time.Second)
 	log.Println("任务完成")
 }
 
