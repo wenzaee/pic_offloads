@@ -21,7 +21,7 @@ func main() {
 	deafault.Hostname, _ = os.Hostname()
 	core.Edgehost, err = libp2p.New(
 		libp2p.ListenAddrStrings(
-			"/ip4/0.0.0.0/tcp/5000",
+			"/ip4/0.0.0.0/tcp/5001",
 		),
 		libp2p.Ping(true), // 启用 Ping 协议
 	)
