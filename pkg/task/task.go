@@ -13,7 +13,6 @@ import (
 	"net/http"
 	deafault "pic_offload/pkg/apis"
 	"strings"
-	"time"
 )
 
 func (ts *TaskScheduler) TransferTaskToTargetHost(taskstr, TargetName string) error {
