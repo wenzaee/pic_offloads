@@ -272,7 +272,7 @@ func (ts *TaskScheduler) DoTask(Taskid string) {
 	} else {
 		task.Done = true
 	}
-	time.Sleep(5 * time.Second)
+//	time.Sleep(5 * time.Second)
 	log.Println("任务完成")
 }
 
