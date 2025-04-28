@@ -32,7 +32,7 @@ type ElectionService struct {
 	registry *mdns.PeerRegistry
 
 	mu         sync.RWMutex
-	leaderHost string // 只存主机名，不存 peer.ID
+	leaderHost string
 	leaderSeen time.Time
 	inElection bool
 

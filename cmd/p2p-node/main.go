@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/libp2p/go-libp2p"
+	"golang.org/x/net/context"
 	"log"
 	"os"
 	"os/signal"
@@ -12,7 +13,6 @@ import (
 	"pic_offload/pkg/mdns"
 	"pic_offload/pkg/task"
 	"syscall"
-	"time"
 )
 
 func main() {
@@ -23,10 +23,9 @@ func main() {
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/5000",
 		),
-		libp2p.DisableRelay(),
 		libp2p.Ping(true), // 启用 Ping 协议
 	)
-	core.Edgehost.SetStreamHandler(deafault.HostnameProtocol, core.HandleRequest)
+	core.Edgehost.SetStreamHandler(deafault.HostnameProtocol, core.HandleNameRequest)
 	if err != nil {
 		log.Fatalf("Failed to create host: %v", err)
 	}
@@ -59,38 +58,59 @@ func main() {
 	core.Edgehost.SetStreamHandler(deafault.AskProtocol, TaskScheduler.HandleAskTask)
 
 	TaskScheduler.ListTasks()
-	hs, _ := os.Hostname()
-	var task1 *task.Task
-	if hs == "edge02" {
-		time.Sleep(5 * time.Second)
-		task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
-		fmt.Println(task1)
 
-		err = TaskScheduler.TransferTaskToTargetHost("task1", "edge01")
+	taskChan := make(chan task.Task, 10)
+	ctx, _ := context.WithCancel(context.Background())
 
-		if err != nil {
-			log.Println("err ", err)
-			return
+	// 启动监控协程
+	go func() {
+		if err := task.MonitorImages(ctx, deafault.WorkDir, deafault.Threshold, deafault.Interval, taskChan, TaskScheduler); err != nil {
+			log.Fatalf("Monitoring failed: %v", err)
 		}
-	}
+	}()
 	go TaskScheduler.TimerList()
+	// 任务处理协程
+	go func() {
+		for task := range taskChan {
+			log.Printf("Processing task %s in %s\n", task.ID, task.FilePath)
+			// 添加实际处理逻辑（如执行命令）
+		}
+	}()
 
-	time.Sleep(1 * time.Second)
-	if hs == "edge02" {
+	// 保持主协程运行
+	select {}
+	//hs, _ := os.Hostname()
+	//var task1 *task.Task
+	//if hs == "edge02" {
+	//	time.Sleep(5 * time.Second)
+	//	task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
+	//	fmt.Println(task1)
+	//
+	//	err = TaskScheduler.TransferTaskToTargetHost("task1", "edge01")
+	//
+	//	if err != nil {
+	//		log.Println("err ", err)
+	//		return
+	//	}
+	//}
 
-		TaskScheduler.RequestTaskMigration("task1", "master")
-	}
-	time.Sleep(5 * time.Second)
-	if hs == "master" {
-		TaskScheduler.DoTask("task1")
-		TaskScheduler.SendTask("task1", "edge02")
-	}
-	// 信号处理
-
-	if hs == "edge01" {
-		time.Sleep(15 * time.Second)
-		TaskScheduler.AskTaskDone("task1")
-	}
+	//
+	//time.Sleep(1 * time.Second)
+	//if hs == "edge02" {
+	//
+	//	TaskScheduler.RequestTaskMigration("task1", "master")
+	//}
+	//time.Sleep(5 * time.Second)
+	//if hs == "master" {
+	//	TaskScheduler.DoTask("task1")
+	//	TaskScheduler.SendTask("task1", "edge02")
+	//}
+	//// 信号处理
+	//
+	//if hs == "edge01" {
+	//	time.Sleep(15 * time.Second)
+	//	TaskScheduler.AskTaskDone("task1")
+	//}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh

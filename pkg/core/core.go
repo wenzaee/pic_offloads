@@ -32,7 +32,7 @@ func RequestHostname(ctx context.Context, host host.Host, peerID peer.ID) (strin
 
 	return string(buf[:n]), nil
 }
-func HandleRequest(s network.Stream) {
+func HandleNameRequest(s network.Stream) {
 	defer s.Close()
 
 	buf := make([]byte, 256)
