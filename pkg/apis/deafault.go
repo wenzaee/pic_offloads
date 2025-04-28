@@ -2,6 +2,10 @@ package deafault
 
 import "time"
 
+var (
+	Hostname string
+)
+
 const (
 	WorkDir           = "./upload" // 上传目录路径
 	Threshold         = 10         // 触发阈值

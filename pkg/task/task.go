@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"github.com/libp2p/go-libp2p/core/network"
 	"golang.org/x/net/context"
 	"io"
 	"log"
+	"net/http"
 	deafault "pic_offload/pkg/apis"
 	"strings"
 	"time"
@@ -206,15 +208,74 @@ func (ts *TaskScheduler) AskTaskDone(Taskid string) {
 	}
 
 }
+
+// 新增方法：与 Flask 服务通信，启动任务
+func (ts *TaskScheduler) StartTaskWithFlask(taskID, flaskURL string) error {
+	task, exists := ts.Tasks[taskID]
+	if !exists {
+		return fmt.Errorf("任务ID %s 不存在", taskID)
+	}
+
+	// 构造请求数据，新增 file_path 字段
+	reqBody := map[string]string{
+		"task_id":   task.ID,
+		"command":   task.Command,
+		"file_path": task.FilePath, // 新增字段，传递文件路径
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("JSON编码失败: %v", err)
+	}
+
+	// 发送 HTTP POST 请求
+	resp, err := http.Post(flaskURL+"/start_task", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("HTTP请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 检查响应状态
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Flask服务返回错误状态: %s", resp.Status)
+	}
+
+	// 解析 Flask 返回的 JSON 响应
+	var response struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return fmt.Errorf("解析 Flask 响应失败: %v", err)
+	}
+
+	// 根据 status 字段处理响应
+	if response.Status != "success" {
+		return fmt.Errorf("Flask 服务处理失败: %s", response.Message)
+	}
+
+	fmt.Printf("任务 %s 已成功发送到 Flask 服务，响应消息: %s\n", taskID, response.Message)
+	return nil
+}
+
+// 调用 StartTaskWithFlask
 func (ts *TaskScheduler) DoTask(Taskid string) {
 	task := ts.Tasks[Taskid]
 
-	log.Println("写在要开始做task", task.ID, task.Command)
-	task.Done = true
+	log.Println("准备开始任务", task.ID, task.Command)
+
+	// 调用 Flask 服务启动任务
+	flaskURL := "http://localhost:5000" // 假设 Flask 服务运行在本地 5000 端口
+	err := ts.StartTaskWithFlask(Taskid, flaskURL)
+	if err != nil {
+		log.Printf("启动任务失败: %v", err)
+		return
+	} else {
+		task.Done = true
+	}
 	time.Sleep(5 * time.Second)
 	log.Println("任务完成")
-
 }
+
 func (ts *TaskScheduler) HandleAskTask(s network.Stream) {
 	value, _ := bufio.NewReader(s).ReadString('\n')
 	value = strings.TrimSuffix(value, "\n")

@@ -7,11 +7,43 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	deafault "pic_offload/pkg/apis"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// 新增函数：检测本地 worker 目录下的文件夹并恢复任务
+func (ts *TaskScheduler) RecoverTasks() error {
+	workerDir := "worker"
+	files, err := os.ReadDir(workerDir)
+	if err != nil {
+		return fmt.Errorf("failed to read worker directory: %w", err)
+	}
+
+	for _, f := range files {
+		if f.IsDir() {
+			taskID := f.Name()
+			taskPath := filepath.Join(workerDir, taskID)
+
+			// 检查是否已经存在该任务
+			if _, exists := ts.Tasks[taskID]; !exists {
+
+				task := Task{
+					ID:       taskID,
+					Command:  "recover_images",
+					Hostname: deafault.Hostname, // 使用动态主机名
+					FilePath: taskPath,
+					Done:     false,
+				}
+				ts.Tasks[taskID] = &task
+				log.Printf("Recovered task %s from directory %s", taskID, taskPath)
+			}
+		}
+	}
+	return nil
+}
 
 func MonitorImages(
 	ctx context.Context,
@@ -27,6 +59,11 @@ func MonitorImages(
 	}
 	if !fileInfo.IsDir() {
 		return fmt.Errorf("%s is not a directory", workDir)
+	}
+
+	// 调用 RecoverTasks 函数恢复未完成的任务
+	if err := ts.RecoverTasks(); err != nil {
+		log.Printf("Failed to recover tasks: %v", err)
 	}
 
 	ticker := time.NewTicker(interval)
@@ -90,7 +127,7 @@ func getImages(dir string) ([]string, error) {
 // 创建新任务并生成目录
 func createTask() (Task, error) {
 	id := uuid.New().String()
-	hostname, _ := os.Hostname()
+	hostname, _ := os.Hostname() // 动态获取当前主机名
 	destDir := filepath.Join("worker", id)
 	err := os.MkdirAll(destDir, 0755)
 	if err != nil {
@@ -99,7 +136,7 @@ func createTask() (Task, error) {
 	return Task{
 		ID:       id,
 		Command:  "process_images",
-		Hostname: hostname,
+		Hostname: hostname, // 使用动态主机名
 		FilePath: destDir,
 		Done:     false,
 	}, nil

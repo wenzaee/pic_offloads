@@ -18,7 +18,7 @@ import (
 func main() {
 
 	var err error
-
+	deafault.Hostname, _ = os.Hostname()
 	core.Edgehost, err = libp2p.New(
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/5000",
@@ -61,7 +61,9 @@ func main() {
 
 	taskChan := make(chan task.Task, 10)
 	ctx, _ := context.WithCancel(context.Background())
-
+	var task1 *task.Task
+	task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
+	TaskScheduler.DoTask(task1.ID)
 	// 启动监控协程
 	go func() {
 		if err := task.MonitorImages(ctx, deafault.WorkDir, deafault.Threshold, deafault.Interval, taskChan, TaskScheduler); err != nil {
@@ -83,7 +85,7 @@ func main() {
 	//var task1 *task.Task
 	//if hs == "edge02" {
 	//	time.Sleep(5 * time.Second)
-	//	task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
+	task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
 	//	fmt.Println(task1)
 	//
 	//	err = TaskScheduler.TransferTaskToTargetHost("task1", "edge01")
