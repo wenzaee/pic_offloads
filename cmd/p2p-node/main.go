@@ -57,27 +57,22 @@ func main() {
 	core.Edgehost.SetStreamHandler(deafault.SendTaskProtocal, TaskScheduler.HandleSendTask)
 	core.Edgehost.SetStreamHandler(deafault.AskProtocol, TaskScheduler.HandleAskTask)
 
-	TaskScheduler.ListTasks()
-
 	taskChan := make(chan task.Task, 10)
 	ctx, _ := context.WithCancel(context.Background())
-	var task1 *task.Task
-	task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
-	TaskScheduler.DoTask(task1.ID)
-	// 启动监控协程
+	//启动监控协程
 	go func() {
 		if err := task.MonitorImages(ctx, deafault.WorkDir, deafault.Threshold, deafault.Interval, taskChan, TaskScheduler); err != nil {
 			log.Fatalf("Monitoring failed: %v", err)
 		}
 	}()
 	go TaskScheduler.TimerList()
-	// 任务处理协程
-	go func() {
-		for task := range taskChan {
-			log.Printf("Processing task %s in %s\n", task.ID, task.FilePath)
-			// 添加实际处理逻辑（如执行命令）
-		}
-	}()
+	//// 任务处理协程
+	//go func() {
+	//	for task := range taskChan {
+	//		log.Printf("Processing task %s in %s\n", task.ID, task.FilePath)
+	//		// 添加实际处理逻辑（如执行命令）
+	//	}
+	//}()
 
 	// 保持主协程运行
 	select {}
@@ -85,7 +80,6 @@ func main() {
 	//var task1 *task.Task
 	//if hs == "edge02" {
 	//	time.Sleep(5 * time.Second)
-	task1 = TaskScheduler.NewTask("task1", "图匹配任务", "edge02", "./test/")
 	//	fmt.Println(task1)
 	//
 	//	err = TaskScheduler.TransferTaskToTargetHost("task1", "edge01")

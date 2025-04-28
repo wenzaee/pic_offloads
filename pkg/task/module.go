@@ -84,6 +84,9 @@ func (ts *TaskScheduler) TimerList() {
 			case <-t.C:
 				for _, i := range ts.Tasks {
 					fmt.Printf("任务 %s 已调度给节点 %s 工作路径 %s Command为 %s 完成情况为 %s \n", i.ID, i.Hostname, i.FilePath, i.Command, i.Done)
+					if i.Done == false {
+						ts.DoTask(i.ID)
+					}
 				}
 			}
 		}
