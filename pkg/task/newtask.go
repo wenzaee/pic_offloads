@@ -17,30 +17,40 @@ import (
 // 新增函数：检测本地 worker 目录下的文件夹并恢复任务
 func (ts *TaskScheduler) RecoverTasks() error {
 	workerDir := "worker"
-	files, err := os.ReadDir(workerDir)
+	entries, err := os.ReadDir(workerDir)
 	if err != nil {
 		return fmt.Errorf("failed to read worker directory: %w", err)
 	}
 
-	for _, f := range files {
-		if f.IsDir() {
-			taskID := f.Name()
-			taskPath := filepath.Join(workerDir, taskID)
-
-			// 检查是否已经存在该任务
-			if _, exists := ts.Tasks[taskID]; !exists {
-
-				task := Task{
-					ID:       taskID,
-					Command:  "recover_images",
-					Hostname: deafault.Hostname, // 使用动态主机名
-					FilePath: taskPath,
-					Done:     false,
-				}
-				ts.Tasks[taskID] = &task
-				log.Printf("Recovered task %s from directory %s", taskID, taskPath)
-			}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
+
+		folder := entry.Name()                  // e.g. "flask-550e8400-e29b-41d4-a716-446655440000"
+		parts := strings.SplitN(folder, "-", 2) // split only on first dash
+		if len(parts) != 2 {
+			log.Printf("跳过无效目录名: %s", folder)
+			continue
+		}
+		taskType, taskID := parts[0], parts[1]
+		taskPath := filepath.Join(workerDir, folder)
+
+		// 如果已经在内存里，就不用重复恢复
+		if _, exists := ts.Tasks[taskID]; exists {
+			continue
+		}
+
+		task := Task{
+			ID:       taskID,
+			Command:  "recover_images",
+			Hostname: deafault.Hostname, // 或者 deafault.Hostname
+			FilePath: taskPath,
+			Tasktype: taskType,
+			Done:     false,
+		}
+		ts.Tasks[taskID] = &task
+		log.Printf("Recovered task %s (type=%s) from %s", taskID, taskType, taskPath)
 	}
 	return nil
 }
@@ -84,7 +94,8 @@ func MonitorImages(
 				continue
 			}
 
-			task, err := createTask()
+			task, err := createTask("yolov5")
+			task.Tasktype = "yolov5"
 			ts.Tasks[task.ID] = &task
 			if err != nil {
 				log.Printf("Error creating task: %v", err)
@@ -125,10 +136,13 @@ func getImages(dir string) ([]string, error) {
 }
 
 // 创建新任务并生成目录
-func createTask() (Task, error) {
+func createTask(taskType string) (Task, error) {
 	id := uuid.New().String()
 	hostname, _ := os.Hostname() // 动态获取当前主机名
-	destDir := filepath.Join("worker", id)
+
+	folderName := fmt.Sprintf("%s-%s", taskType, id)
+	destDir := filepath.Join("worker", folderName)
+
 	err := os.MkdirAll(destDir, 0755)
 	if err != nil {
 		return Task{}, err

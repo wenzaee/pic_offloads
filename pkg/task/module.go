@@ -15,6 +15,7 @@ type Task struct {
 	Command  string
 	Hostname string
 	FilePath string
+	Tasktype string
 	Done     bool
 }
 type TaskScheduler struct {
@@ -23,13 +24,16 @@ type TaskScheduler struct {
 	registry *mdns.PeerRegistry
 	h        host.Host
 }
-type MigrationTask struct {
-	ID          string
-	Source      string
-	Destination string
-	Resource    string
-	Command     string
-}
+
+/*
+	type MigrationTask struct {
+		ID          string
+		Source      string
+		Destination string
+		Resource    string
+		Command     string
+	}
+*/
 type TaskMigrationRequest struct {
 	TaskID      string // 任务ID，用于标识任务
 	SourceHost  string // 当前主机名称
@@ -50,7 +54,7 @@ func (ts *TaskScheduler) ListTasks() {
 
 	fmt.Println("已调度的任务:")
 	for _, task := range ts.Tasks {
-		fmt.Printf("任务ID: %s, 命令: %s, 主机: %s\n", task.ID, task.Command, task.Hostname)
+		fmt.Printf("任务ID: %s, 命令: %s, 主机: %s 类型: %s\n", task.ID, task.Command, task.Hostname, task.Tasktype)
 	}
 }
 func (ts *TaskScheduler) ScheduleTask(task *Task) {
@@ -83,7 +87,7 @@ func (ts *TaskScheduler) TimerList() {
 				return
 			case <-t.C:
 				for _, i := range ts.Tasks {
-					fmt.Printf("任务 %s 已调度给节点 %s 工作路径 %s Command为 %s 完成情况为 %s \n", i.ID, i.Hostname, i.FilePath, i.Command, i.Done)
+					fmt.Printf("任务 %s 已调度给节点 %s 工作路径 %s Command为 %s 类型 %s 完成情况为 %s \n", i.ID, i.Hostname, i.FilePath, i.Command, i.Tasktype, i.Done)
 					if i.Done == false {
 						ts.DoTask(i.ID)
 					}

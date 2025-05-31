@@ -4,15 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/gob"
-	"encoding/json"
 	"fmt"
 	"github.com/libp2p/go-libp2p/core/network"
 	"golang.org/x/net/context"
 	"io"
 	"log"
-	"net/http"
-	"os"
-	"path/filepath"
 	deafault "pic_offload/pkg/apis"
 	"strings"
 )
@@ -208,82 +204,6 @@ func (ts *TaskScheduler) AskTaskDone(Taskid string) {
 		ts.Tasks[Taskid].Done = true
 	}
 
-}
-
-// 新增方法：与 Flask 服务通信，启动任务
-func (ts *TaskScheduler) StartTaskWithFlask(taskID, flaskURL string) error {
-	task, exists := ts.Tasks[taskID]
-	if !exists {
-		return fmt.Errorf("任务ID %s 不存在", taskID)
-	}
-
-	// 构造请求数据，新增 file_path 字段
-	reqBody := map[string]string{
-		"task_id":   task.ID,
-		"command":   task.Command,
-		"file_path": task.FilePath, // 新增字段，传递文件路径
-	}
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("JSON编码失败: %v", err)
-	}
-
-	// 发送 HTTP POST 请求
-	resp, err := http.Post(flaskURL+"/start_task", "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("HTTP请求失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// 检查响应状态
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Flask服务返回错误状态: %s", resp.Status)
-	}
-
-	// 解析 Flask 返回的 JSON 响应
-	var response struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return fmt.Errorf("解析 Flask 响应失败: %v", err)
-	}
-
-	// 根据 status 字段处理响应
-	if response.Status != "success" {
-		return fmt.Errorf("Flask 服务处理失败: %s", response.Message)
-	}
-
-	fmt.Printf("任务 %s 已成功发送到 Flask 服务，响应消息: %s\n", taskID, response.Message)
-	return nil
-}
-
-// 调用 StartTaskWithFlask
-func (ts *TaskScheduler) DoTask(Taskid string) {
-	task := ts.Tasks[Taskid]
-
-	log.Println("准备开始任务", task.ID, task.Command)
-
-	// 调用 Flask 服务启动任务
-	flaskURL := "http://localhost:5000" // 假设 Flask 服务运行在本地 5000 端口
-	err := ts.StartTaskWithFlask(Taskid, flaskURL)
-	if err != nil {
-		log.Printf("启动任务失败: %v", err)
-		return
-	} else {
-		task.Done = true
-
-		// 新增逻辑：根据 DeleteWorkerDir 变量决定是否删除 worker 目录下的任务文件夹
-		if deafault.DeleteWorkerDir {
-			taskDir := filepath.Join("worker", Taskid)
-			if err := os.RemoveAll(taskDir); err != nil {
-				log.Printf("删除任务文件夹 %s 失败: %v", taskDir, err)
-			} else {
-				log.Printf("已删除任务文件夹: %s", taskDir)
-			}
-		}
-	}
-	log.Println("任务完成")
 }
 
 func (ts *TaskScheduler) HandleAskTask(s network.Stream) {
