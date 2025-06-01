@@ -77,9 +77,14 @@ func (ts *TaskScheduler) NewTask(ID string, Command string, Hostname string, Fil
 }
 func (ts *TaskScheduler) TimerList() {
 	// 记录调度开始时间
+
+	//now we do exp
+	ts.TransferTaskToTargetHost("yolov5-2", "edge02")
+	ts.TransferTaskToTargetHost("yolov5-3", "edge03")
+	fmt.Println("now we trans two missions")
 	start := time.Now()
 	allDoneLogged := false
-
+	flag := false
 	ctx, _ := context.WithCancel(context.Background())
 	go func() {
 		t := time.NewTicker(deafault.ListtaskInterval)
@@ -99,14 +104,16 @@ func (ts *TaskScheduler) TimerList() {
 						i.ID, i.Hostname, i.FilePath, i.Command, i.Tasktype, i.Done,
 					)
 					if !i.Done && i.Hostname == deafault.Hostname {
+						flag = true
 						ts.DoTask(i.ID)
+
 					} else if !i.Done && i.Hostname != deafault.Hostname {
 						ts.AskTaskDone(i.ID)
 					}
 				}
 
 				// 如果之前没打印完成耗时，检查是否所有任务都已完成
-				if !allDoneLogged {
+				if !allDoneLogged && flag {
 					allDone := true
 					for _, i := range ts.Tasks {
 						if !i.Done {
