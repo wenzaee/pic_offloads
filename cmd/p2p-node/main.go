@@ -13,7 +13,6 @@ import (
 	"pic_offload/pkg/mdns"
 	"pic_offload/pkg/task"
 	"syscall"
-	"time"
 )
 
 func main() {

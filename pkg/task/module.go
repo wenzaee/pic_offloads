@@ -79,9 +79,11 @@ func (ts *TaskScheduler) TimerList() {
 	// 记录调度开始时间
 
 	//now we do exp
-	ts.TransferTaskToTargetHost("yolov5-2", "edge02")
-	ts.TransferTaskToTargetHost("yolov5-3", "edge03")
-	fmt.Println("now we trans two missions")
+	if deafault.Hostname == "edge01" {
+		ts.TransferTaskToTargetHost("yolov5-2", "edge02")
+		ts.TransferTaskToTargetHost("yolov5-3", "edge03")
+		fmt.Println("now we trans two missions")
+	}
 	start := time.Now()
 	allDoneLogged := false
 	flag := false
