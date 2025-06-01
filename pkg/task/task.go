@@ -9,13 +9,15 @@ import (
 	"golang.org/x/net/context"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	deafault "pic_offload/pkg/apis"
 	"strings"
 )
 
 func (ts *TaskScheduler) TransferTaskToTargetHost(taskstr, TargetName string) error {
 	task := ts.Tasks[taskstr]
-	fmt.Println("task", task)
+	fmt.Println("task", task, "targetname", TargetName)
 	tarData, err := CompressFolderToTar(task.FilePath)
 	if err != nil {
 		return fmt.Errorf("压缩文件夹失败: %v", err)
@@ -23,14 +25,16 @@ func (ts *TaskScheduler) TransferTaskToTargetHost(taskstr, TargetName string) er
 
 	Targetpid := ts.registry.MapNamePeer[TargetName]
 	stream, err := ts.h.NewStream(context.Background(), Targetpid, deafault.FilesProtocol)
-
+	fmt.Println("task!2", task, "targetname", TargetName)
 	if err != nil {
+		fmt.Println(err)
 		return fmt.Errorf("无法建立流连接: %v", err)
 	}
+	fmt.Println("!!!task!3", task, "targetname", TargetName)
 	defer stream.Close()
-
-	task.Hostname = TargetName
-
+	fmt.Println("task!3", task, "targetname", TargetName)
+	ts.Tasks[taskstr].Hostname = TargetName
+	fmt.Println("task!4", task, "targetname", TargetName)
 	var taskBuf bytes.Buffer
 	encodertaskBuf := gob.NewEncoder(&taskBuf)
 	err = encodertaskBuf.Encode(task)
@@ -79,8 +83,15 @@ func (ts *TaskScheduler) Handlefiles(s network.Stream) {
 		// 将数据追加到 tarData
 		tarData = append(tarData, buf[:n]...)
 	}
+	baseDir := "/root/pic_offloads/worker"
+	targetDir := filepath.Join(baseDir, task.ID)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		log.Printf("创建目标目录失败: %v", err)
+		return
+	}
+
 	// 解压接收到的 tar 文件
-	err = ExtractTarToFolder(tarData, "/root/pic_offloads/worker/")
+	err = ExtractTarToFolder(tarData, targetDir)
 	if err != nil {
 		log.Printf("解压失败: %v", err)
 	} else {

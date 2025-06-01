@@ -67,7 +67,7 @@ func main() {
 			log.Fatalf("Monitoring failed: %v", err)
 		}
 	}()
-	time.Sleep(10 * time.Second)
+	time.Sleep(3 * time.Second)
 	fmt.Println("task:", TaskScheduler.Tasks)
 	for index, i := range TaskScheduler.Tasks {
 		fmt.Println(index, i)
