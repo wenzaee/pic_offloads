@@ -13,6 +13,7 @@ import (
 	"pic_offload/pkg/mdns"
 	"pic_offload/pkg/task"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -66,6 +67,11 @@ func main() {
 			log.Fatalf("Monitoring failed: %v", err)
 		}
 	}()
+	time.Sleep(10 * time.Second)
+	fmt.Println("task:", TaskScheduler.Tasks)
+	for index, i := range TaskScheduler.Tasks {
+		fmt.Println(index, i)
+	}
 	go TaskScheduler.TimerList()
 	//// 任务处理协程
 	//go func() {

@@ -80,8 +80,8 @@ func (ts *TaskScheduler) TimerList() {
 
 	//now we do exp
 	if deafault.Hostname == "edge01" {
-		ts.TransferTaskToTargetHost("yolov5-2", "edge02")
-		ts.TransferTaskToTargetHost("yolov5-3", "edge03")
+		ts.TransferTaskToTargetHost("2", "edge02")
+		ts.TransferTaskToTargetHost("3", "edge03")
 		fmt.Println("now we trans two missions")
 	}
 	start := time.Now()

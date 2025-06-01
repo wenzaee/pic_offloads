@@ -15,6 +15,7 @@ import (
 
 func (ts *TaskScheduler) TransferTaskToTargetHost(taskstr, TargetName string) error {
 	task := ts.Tasks[taskstr]
+	fmt.Println("task", task)
 	tarData, err := CompressFolderToTar(task.FilePath)
 	if err != nil {
 		return fmt.Errorf("压缩文件夹失败: %v", err)
@@ -79,7 +80,7 @@ func (ts *TaskScheduler) Handlefiles(s network.Stream) {
 		tarData = append(tarData, buf[:n]...)
 	}
 	// 解压接收到的 tar 文件
-	err = ExtractTarToFolder(tarData, "/root/testget/")
+	err = ExtractTarToFolder(tarData, "/root/pic_offloads/worker/")
 	if err != nil {
 		log.Printf("解压失败: %v", err)
 	} else {
