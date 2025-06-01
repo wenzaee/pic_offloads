@@ -84,8 +84,8 @@ func (ts *TaskScheduler) Handlefiles(s network.Stream) {
 		tarData = append(tarData, buf[:n]...)
 	}
 	baseDir := "/root/pic_offloads/worker"
-	baseDir = filepath.Join(baseDir, task.Tasktype, "-")
-	targetDir := filepath.Join(baseDir, task.ID)
+	subDirName := task.Tasktype + "-" + task.ID
+	targetDir := filepath.Join(baseDir, subDirName)
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		log.Printf("创建目标目录失败: %v", err)
 		return
