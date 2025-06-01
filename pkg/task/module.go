@@ -76,24 +76,52 @@ func (ts *TaskScheduler) NewTask(ID string, Command string, Hostname string, Fil
 	return aTask
 }
 func (ts *TaskScheduler) TimerList() {
+	// 记录调度开始时间
+	start := time.Now()
+	allDoneLogged := false
 
 	ctx, _ := context.WithCancel(context.Background())
 	go func() {
 		t := time.NewTicker(deafault.ListtaskInterval)
 		defer t.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
+				// 如果你在别处调用了 cancel()，这里会退出；否则，ctx.Done 永远不会被触发，循环会一直运行
 				return
+
 			case <-t.C:
+				// 遍历并打印当前所有任务状态
 				for _, i := range ts.Tasks {
-					fmt.Printf("任务 %s 已调度给节点 %s 工作路径 %s Command为 %s 类型 %s 完成情况为 %s \n", i.ID, i.Hostname, i.FilePath, i.Command, i.Tasktype, i.Done)
-					if i.Done == false {
+					fmt.Printf(
+						"任务 %s 已调度给节点 %s 工作路径 %s Command为 %s 类型 %s 完成情况为 %v\n",
+						i.ID, i.Hostname, i.FilePath, i.Command, i.Tasktype, i.Done,
+					)
+					if !i.Done && i.Hostname == deafault.Hostname {
 						ts.DoTask(i.ID)
+					} else if !i.Done && i.Hostname != deafault.Hostname {
+						ts.AskTaskDone(i.ID)
 					}
 				}
+
+				// 如果之前没打印完成耗时，检查是否所有任务都已完成
+				if !allDoneLogged {
+					allDone := true
+					for _, i := range ts.Tasks {
+						if !i.Done {
+							allDone = false
+							break
+						}
+					}
+					if allDone {
+						elapsed := time.Since(start)
+						fmt.Printf("所有任务已完成，总耗时：%v\n", elapsed)
+						allDoneLogged = true
+					}
+				}
+				// 如果 allDoneLogged 已经是 true，则不再重复打印
 			}
 		}
 	}()
-	return
 }

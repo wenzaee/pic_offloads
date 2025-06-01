@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 )
 
 func (ts *TaskScheduler) StartCPUTask(taskID, _ string) error {
@@ -76,7 +77,7 @@ func (ts *TaskScheduler) StartTaskWithFlask(taskID, flaskURL string) error {
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return fmt.Errorf("解析 Flask 响应失败: %v", err)
 	}
-
+	fmt.Println("响应", response.Status)
 	// 根据 status 字段处理响应
 	if response.Status != "success" {
 		return fmt.Errorf("Flask 服务处理失败: %s", response.Message)
@@ -99,14 +100,30 @@ func (ts *TaskScheduler) DoTask(taskID string) {
 	switch task.Tasktype {
 
 	case "yolov5":
-		flaskURL := "http://localhost:5000"
-		go func(id, url string) {
-			if err := ts.StartTaskWithFlask(id, url); err != nil {
-				log.Printf("Task %s (yolov5) 启动失败: %v", id, err)
-				return
-			}
-			log.Printf("Task %s (yolov5) 完成", id)
-		}(taskID, flaskURL)
+		flaskURL := "http://localhost:8001"
+
+		// 记录开始时间
+		start := time.Now()
+
+		if err := ts.StartTaskWithFlask(task.ID, flaskURL); err != nil {
+			log.Printf("Task %s (yolov5) 启动失败: %v", task.ID, err)
+			return
+		}
+
+		// 计算并输出耗时
+		elapsed := time.Since(start)
+		log.Printf("\nTask %s StartTaskWithFlask 耗时: %v\n", task.ID, elapsed)
+
+		ts.Tasks[taskID].Done = true
+
+		//flaskURL := "http://localhost:8001"
+		//go func(id, url string) {
+		//	if err := ts.StartTaskWithFlask(id, url); err != nil {
+		//		log.Printf("Task %s (yolov5) 启动失败: %v", id, err)
+		//		return
+		//	}
+		//	log.Printf("Task %s (yolov5) 完成", id)
+		//}(taskID, flaskURL)
 
 	case "yolov4":
 		/*go func(id, cmd string) {
